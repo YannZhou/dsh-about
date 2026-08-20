@@ -21,13 +21,13 @@ DeepSeek Harness 设置中心「关于」分区插件 —— **检查更新 + �
 - `npm install -g` 带 5 分钟超时与进程组终止，安装输出尾部回显到弹窗便于排查。
 - 只有加载了本插件的 dsh 进程才获得这些能力；不修改任何核心文件，卸载即完全移除。
 
-## 安装（给 AI 的一句话版本）
+## 安装
 
 把你的 AI 指到本仓库，一句话即可：
 
 > 把 https://github.com/YannZhou/dsh-about 这个 dsh 插件装到 DeepSeek Harness 的 web profile 里。请按仓库里的 AI-INSTALL.md 执行。
 
-人类手动安装：
+手动安装：
 
 ```sh
 git clone https://github.com/YannZhou/dsh-about.git
