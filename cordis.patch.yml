@@ -1,0 +1,11 @@
+# dsh-about — bundle 补丁层。
+#
+# 本包声明了 dsh.bundle.patch，安装（dsh plugin --profile <name> add <本包>）后
+# 这一层会随组合图自动应用：挂载「关于」插件行。插件行 id/name 与本包名一致，
+# Node 解析会在 profile 的 node_modules 中找到本包。
+#
+# 浏览器半体无需手动注册：包内 dsh.client 清单 + exports["./client"] 会被
+# dsh-client-modules 在组合图重建后自动发现、打包并注入 Web 前端。
+- insert:
+  - id: dsh-about
+    name: dsh-about
