@@ -11,8 +11,8 @@ DeepSeek Harness 设置中心「关于」分区插件 —— **检查更新 + �
 - **版本信息**：当前 dsh 版本（npm 包 `@deepseek-ai/dsh`）、Web 前端版本、Node / 平台、项目主页。
 - **检查更新**：对比当前版本与 npm `latest` / `next` 两个 dist-tag 中较新者，提示发现新版本。
 - **版本选择**：列出 npm 上所有比当前新的版本（最多 10 个），弹窗选择安装。
-- **一键更新**：`npm install -g @deepseek-ai/dsh@<目标版本>`（固定官方 registry），成功后**自动重启 dsh web**（独立看护进程等待宿主退出后按原命令重新拉起，含启动即崩重试）。
-- **版本更新记录**：官方 GitHub Releases 最新 10 条，中文正文渲染，每日首次打开自动拉取一次。
+- **一键更新**：`npm install -g @deepseek-ai/dsh@<目标版本>`（固定官方 registry），成功后**自动重启 dsh web**（委托外部一次性看护 `~/.local/bin/dsh-watchdog once`：等宿主退出 → 数 3 秒 → 优先 systemd 拉起 `dsh-web`、退回原命令裸拉起（带 `--no-open`），端口就绪后**自动退出、零常驻**；决策日志 `~/.dsh/dsh-watchdog.log`）。
+- **版本更新记录**：官方 GitHub Releases 最新 10 条，中文正文渲染，每日首次打开自动拉取一次并**保存到本地电脑**（`$DSH_HOME/dsh-about/releases-cache.json`），失败不会反复重试；点「刷新」可手动强刷。
 
 ## 安全性设计要点
 
@@ -57,7 +57,7 @@ dsh plugin --profile web remove dsh-about
 | 文件 | 半体 | 职责 |
 |---|---|---|
 | `lib/index.js` | 宿主（Cordis loader 行） | 注册 `/dsh-about/{describe,releases,check,versions,update}` 同源 HTTP 路由；npm dist-tag / packument / GitHub Releases 拉取；`npm install -g` 执行与自动重启看护 |
-| `lib/client.js` | 浏览器（`window.__ModuleLoader__` 模块） | 注册 `settings.section`（id: `about`，导航「关于」）组件：图标、版本行、检查更新/一键更新弹窗、版本更新记录（localStorage 日缓存） |
+| `lib/client.js` | 浏览器（`window.__ModuleLoader__` 模块） | 注册 `settings.section`（id: `about`，导航「关于」）组件：图标、版本行、检查更新/一键更新弹窗、版本更新记录（数据由宿主落盘，浏览器不再用 localStorage） |
 
 - 宿主行由 `cordis.patch.yml`（`dsh.bundle.patch`）挂载；浏览器半体由包内 `dsh.client` 清单 + `exports["./client"]` 自动发现打包（`@deepseek-ai/dsh-client-modules` 机制）。
 - **零运行时依赖**：semver 已内嵌（`lib/semver.js`，语义与 node-semver 对齐并通过全量对拍）。`dsh plugin add <目录>` 走 `link:` 协议时不携带外部依赖，因此 clone 即可装、即装即用。

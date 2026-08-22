@@ -1,0 +1,407 @@
+#!/usr/bin/env bash
+# =============================================================================
+# dsh-watchdog — DeepSeek Harness web 后台服务看护
+#
+# 作用：
+#   「当检测到 dsh web 后台服务关闭时，计时 3 秒，然后重新拉起后台服务
+#   （--no-open，不自动打开浏览器）；用户只需刷新当前页面即可恢复使用。」
+#
+# 启动方式（二选一）：
+#   1) 推荐：作为 systemd 用户服务常驻（dsh-watchdog.service），登录/开机自启。
+#   2) 手动：  setsid nohup ~/.local/bin/dsh-watchdog &
+#
+# 常用命令：
+#   dsh-watchdog check                    # 只检查一次当前状态并退出（诊断用）
+#   journalctl --user -u dsh-watchdog -f  # 看护进程自身日志
+#   tail -f ~/.dsh/dsh-watchdog.log       # 看护决策日志（检测/计数/拉起全程记录）
+#
+# 与 systemd dsh-web.service 的分工：
+#   - systemd 的 Restart=on-failure 兜底「非正常退出」；
+#   - 本脚本兜底「一切端口不可用」的情况（正常退出、单元 failed、进程挂死、
+#     npm 更新后插件看护失效等），并按你的要求固定 3 秒后拉起。
+#   - 检测以「端口 3080 是否在服务」为准，systemd 正在自动重启时看护不干预。
+#
+# 可靠性设计（deadline 驱动）：
+#   - 只要端口不通，就永远存在一个「下一次动作时间点（next_action）」：
+#     要么是 3 秒计数截止、要么是退避/验证截止。不会出现「掉线后永久沉默」。
+#   - 单实例锁（flock）；计数期间若服务自己回来则取消本次拉起。
+#   - 刚拉起又快速崩溃（STABLE_WINDOW 内再次掉线，含「起来不到一轮就死」）时
+#     退避拉长：3s→5s→10s→20s→40s→60s→120s→300s，稳定满窗口后重置。
+#     常规场景始终是先数 3 秒、到点直接拉起。
+# =============================================================================
+set -u
+
+# ----------------------------- 可调参数（环境变量可覆盖） --------------------
+PORT="${DSH_WATCH_PORT:-3080}"                  # 检测的端口
+UNIT="${DSH_WATCH_UNIT:-dsh-web}"               # systemd 用户服务名
+COUNTDOWN="${DSH_WATCH_COUNTDOWN:-3}"           # 检测到关闭后的等待秒数
+POLL="${DSH_WATCH_POLL:-2}"                     # 主轮询间隔（秒）
+STABLE_WINDOW="${DSH_WATCH_STABLE_WINDOW:-30}"  # 稳定窗口（秒）
+START_TIMEOUT="${DSH_WATCH_START_TIMEOUT:-45}"  # 拉起后等待就绪的最长时间（秒）
+LOG="${DSH_WATCH_LOG:-${HOME:-}/.dsh/dsh-watchdog.log}"
+LOCKFILE="${DSH_WATCH_LOCK:-${HOME:-}/.dsh/.dsh-watchdog.lock}"
+NO_SYSTEMD="${DSH_WATCH_NO_SYSTEMD:-0}"         # 1=完全跳过 systemd，直接裸命令
+START_CMD="${DSH_WATCH_START_CMD:-}"            # 裸命令启动串（默认解析 dsh 路径）
+BACKOFFS=(3 5 10 20 40 60 120 300)
+
+LOG_DIR="$(dirname "$LOG")"
+[ -d "$LOG_DIR" ] || mkdir -p "$LOG_DIR" 2>/dev/null
+[ -d "${HOME:-}/.dsh" ] || mkdir -p "${HOME:-}/.dsh" 2>/dev/null
+
+log() { printf '%s [%s] %s\n' "$(date '+%F %T')" "$1" "$2" >>"$LOG"; }
+
+# ----------------------------- 依赖解析 --------------------------------------
+CURL="$(command -v curl 2>/dev/null || true)"
+SYSTEMCTL="$(command -v systemctl 2>/dev/null || true)"
+DSH_BIN="$(command -v dsh 2>/dev/null || true)"
+[ -n "$DSH_BIN" ] || DSH_BIN="${HOME:-}/.npm-global/bin/dsh"
+[ -n "$START_CMD" ] || START_CMD="${DSH_WATCH_RAW_CMD:-}"
+[ -n "$START_CMD" ] || START_CMD="$(printf '%s ' "$DSH_BIN" web --no-open | sed 's/ $//')"
+[ -x "$DSH_BIN" ] || log warn "dsh binary not found/executable: $DSH_BIN"
+
+# ----------------------------- 健康检查 --------------------------------------
+# 端口可用（任何 HTTP 响应都算“在线”，包括 4xx/5xx）；无 curl 时退回 TCP 探测。
+port_up() {
+  local code
+  if [ -n "$CURL" ]; then
+    code="$(curl -sk -o /dev/null --max-time 2 -w '%{http_code}' "http://127.0.0.1:${PORT}/" 2>/dev/null)"
+    [ "$code" != "000" ] && return 0
+    return 1
+  fi
+  timeout 2 bash -c "exec 3<>/dev/tcp/127.0.0.1/${PORT}" 2>/dev/null && return 0
+  return 1
+}
+
+# systemd 单元状态：active / activating / inactive / failed / unknown / nosystemd
+unit_state() {
+  [ "$NO_SYSTEMD" = "1" ] && { echo "nosystemd"; return; }
+  [ -n "$SYSTEMCTL" ] || { echo "nosystemd"; return; }
+  local st
+  st="$("$SYSTEMCTL" --user is-active "$UNIT" 2>/dev/null)"
+  [ -z "$st" ] && st="unknown"
+  echo "$st"
+}
+
+# ----------------------------- 拉起服务 --------------------------------------
+# 返回 0 = 已发出启动请求（可能还在绑定），1 = 未发出（systemd 正在处理等）。
+start_service() {
+  local st
+  st="$(unit_state)"
+  case "$st" in
+    active)
+      # 单元“活着”但端口不通 = 进程挂死/白屏卡死 → 重启单元
+      log warn "unit=${st} but port ${PORT} down (process likely hung); systemctl restart $UNIT"
+      if [ "$NO_SYSTEMD" != "1" ] && [ -n "$SYSTEMCTL" ] && "$SYSTEMCTL" --user restart "$UNIT" >/dev/null 2>&1; then
+        return 0
+      fi
+      return 1
+      ;;
+    activating)
+      log info "unit=${st}, systemd is auto-restarting; stand by"
+      return 1
+      ;;
+    inactive|failed)
+      if [ "$NO_SYSTEMD" != "1" ] && [ -n "$SYSTEMCTL" ]; then
+        log info "start via systemd: reset-failed + start $UNIT"
+        "$SYSTEMCTL" --user reset-failed "$UNIT" >/dev/null 2>&1 || true
+        if "$SYSTEMCTL" --user start "$UNIT" >/dev/null 2>&1; then
+          log info "systemd start issued: $UNIT"
+          return 0
+        fi
+        log warn "systemd start $UNIT failed -> raw launch fallback"
+      fi
+      ;&
+    unknown|nosystemd)
+      # systemd 不可用/单元未知 → 直接裸命令拉起（绝不打开浏览器）
+      # setsid --fork + exec：新会话、无残留包装进程；bash -c 而非 -l，避开登录 profile 副作用
+      log info "raw launch: $START_CMD"
+      setsid --fork bash -c "cd \"$HOME\" && exec $START_CMD" >>"$HOME/.dsh/dsh-web.log" 2>&1 &
+      log info "raw launch issued (detached session)"
+      return 0
+      ;;
+    *)
+      log warn "unhandled unit state: $st"
+      return 1
+      ;;
+  esac
+}
+
+# 拉起后轮询等待端口就绪；0 = 就绪，1 = 超时
+wait_ready() {
+  local waited=0
+  while [ "$waited" -lt "$START_TIMEOUT" ]; do
+    port_up && return 0
+    sleep 1
+    waited=$((waited + 1))
+  done
+  return 1
+}
+
+backoff_at() { # $1 = fails 计数 → 对应退避秒数
+  local idx=$(( $1 - 1 ))
+  [ "$idx" -lt 0 ] && idx=0
+  [ "$idx" -ge "${#BACKOFFS[@]}" ] && idx=$((${#BACKOFFS[@]} - 1))
+  echo "${BACKOFFS[$idx]}"
+}
+
+# 真正执行一次“尝试拉起”，并排定下一次动作时间点 next_action。
+# 成功：排一个“验证截止”（服务若立刻又死，会再次进入拉起流程）；
+# 失败：按退避排下一次重试。保证掉线期间永远有下一步。
+do_start() {
+  local t0 now
+  t0="$(date +%s)"
+  if start_service; then
+    log info "waiting for port ${PORT} to come up..."
+    if wait_ready; then
+      now="$(date +%s)"
+      log info "service relaunched OK, port ${PORT} ready ($(( now - t0 ))s)"
+      # 注意：不在这里清零 fails —— 只在「稳定满 STABLE_WINDOW」时清零，
+      # 这样连续“起来就崩”会让退避逐级拉长（3→5→10→20…）
+      absolved=0
+      up_since="$now"
+      last_launch_ok=1
+      next_action=$(( now + START_TIMEOUT + POLL ))   # 验证窗口：到点还掉线→再拉起
+    else
+      fails=$((fails + 1)); last_launch_ok=0
+      log warn "start not ready in ${START_TIMEOUT}s (fails=${fails})"
+      next_action=$(( $(date +%s) + $(backoff_at "$fails") ))
+    fi
+  else
+    fails=$((fails + 1)); last_launch_ok=0
+    log warn "no start issued this round (fails=${fails})"
+    next_action=$(( $(date +%s) + $(backoff_at "$fails") ))
+  fi
+}
+
+# ----------------------------- once：更新时的一次性看护 ----------------------
+# 由 dsh-about 插件在「一键更新」成功后派发（也可手工使用）：
+#   1) 等待宿主（旧 dsh 进程）退出（HOST_WAIT 上限，防 PID 复用的 starttime 校验）；
+#   2) 数 COUNTDOWN 秒；期间若服务已被 systemd 等拉起 → 直接判定完成；
+#   3) 拉起后台服务：优先 systemd（避免与单元抢端口/撞 StartLimit），
+#      不可用/失败则退回裸命令（--no-open，不弹浏览器）；
+#   4) 端口就绪 → 记录成功日志 → **自动退出**（不常驻、不占资源）。
+proc_starttime() { # $1=pid → /proc/<pid>/stat 的 starttime；comm 可能含空格/括号，先掐掉
+  local rest
+  rest="$(cat "/proc/$1/stat" 2>/dev/null)" || return 1
+  rest="${rest##*) }"
+  set -- $rest
+  echo "$20"
+}
+pid_alive() { # $1=pid $2=期望 starttime（可空）：进程在且身份吻合 → 0
+  [ -d "/proc/$1" ] || return 1
+  if [ -n "$2" ]; then
+    [ "$(proc_starttime "$1")" = "$2" ] || return 1
+  fi
+  return 0
+}
+
+once_main() {
+  local pid="${DSH_WATCH_PID:-0}"
+  # 允许命令行覆盖：--pid N  --port N  --raw-cmd "命令"  --unit NAME
+  while [ "$#" -gt 0 ]; do
+    case "$1" in
+      --pid) pid="${2:?}"; shift 2 ;;
+      --port) PORT="${2:?}"; shift 2 ;;
+      --raw-cmd) START_CMD="$2"; shift 2 ;;
+      --unit) UNIT="${2:?}"; shift 2 ;;
+      *) shift ;;
+    esac
+  done
+
+  local host_wait deadline
+  host_wait="${DSH_WATCH_HOST_WAIT:-180}"
+  deadline=$(( $(date +%s) + ${DSH_WATCH_MAX_RUNTIME:-600} ))
+
+  log info "[once] armed pid=$pid port=$PORT unit=$UNIT raw=$START_CMD"
+  log info "[once] will wait for host exit, relaunch, then exit automatically"
+
+  # ── 阶段 0：等宿主退出（最多 host_wait 秒）──
+  if [ "$pid" -gt 0 ] 2>/dev/null; then
+    local st at0
+    st="$(proc_starttime "$pid")"
+    at0="$(date +%s)"
+    while [ "$(date +%s)" -lt $(( at0 + host_wait )) ]; do
+      pid_alive "$pid" "$st" || break
+      sleep 1
+    done
+    if pid_alive "$pid" "$st"; then
+      log warn "[once] host pid $pid still alive after ${host_wait}s (update cancelled?); exiting without action"
+      exit 0
+    fi
+    log info "[once] host pid $pid exited"
+  fi
+
+  # ── 阶段 0.5：等端口"掉下来"（旧进程释放监听）──
+  # 宿主刚退出时旧 socket 可能仍在收尾（TIME_WAIT / 关闭竞态），若此刻误判
+  # “端口在线”会提前退出、无人拉起。最多等 15s：期间端口若始终不掉，
+  # 说明已有新实例/systemd 在服务 → 判定完成。否则等它掉线后进入数秒流程。
+  local settled=0
+  while [ "$settled" -lt 15 ]; do
+    port_up || break
+    sleep 1
+    settled=$((settled + 1))
+  done
+  if [ "$settled" -ge 15 ]; then
+    log info "[once] port stayed up ${settled}s after host exit (a replacement may already be serving); exiting"
+    exit 0
+  fi
+
+  # ── 阶段 1：数秒 → 拉起 → 端口就绪即退出；最长跑到 deadline ──
+  local countdown_done=0 once_activating_since=0
+  while [ "$(date +%s)" -lt "$deadline" ]; do
+    if port_up; then
+      log info "[once] service is UP on port ${PORT}; one-shot done, exiting"
+      exit 0
+    fi
+    if [ "$(unit_state)" = "activating" ]; then
+      # systemd 自己正在重启：短时间不干预；卡死超过 60s 强制复位拉起
+      [ "$once_activating_since" -eq 0 ] && once_activating_since="$(date +%s)"
+      if [ $(( $(date +%s) - once_activating_since )) -gt 60 ]; then
+        log warn "[once] unit stuck in auto-restart >60s; forcing reset-failed + start $UNIT"
+        [ "$NO_SYSTEMD" != "1" ] && [ -n "$SYSTEMCTL" ] && {
+          "$SYSTEMCTL" --user reset-failed "$UNIT" >/dev/null 2>&1 || true
+          "$SYSTEMCTL" --user start "$UNIT" >/dev/null 2>&1 || true
+        }
+        once_activating_since=0
+      fi
+      sleep 2; continue
+    fi
+    once_activating_since=0
+    if [ "$countdown_done" = 0 ]; then
+      log warn "[once] service down; counting ${COUNTDOWN}s before relaunch"
+      countdown_done=1
+      sleep "$COUNTDOWN"
+      continue
+    fi
+    if [ "$once_fails" -gt 0 ]; then
+      sleep "$(backoff_at "$once_fails")"
+    fi
+    if port_up; then
+      log info "[once] service is UP on port ${PORT}; one-shot done, exiting"
+      exit 0
+    fi
+    once_relaunch
+  done
+  log warn "[once] gave up after ${DSH_WATCH_MAX_RUNTIME:-600}s; manual restart may be needed"
+  exit 1
+}
+
+once_relaunch() {
+  local t0 now
+  t0="$(date +%s)"
+  if start_service; then
+    log info "[once] waiting for port ${PORT} to come up..."
+    if wait_ready; then
+      now="$(date +%s)"
+      log info "[once] service relaunched OK, port ${PORT} ready ($(( now - t0 ))s); one-shot done, exiting"
+      exit 0
+    fi
+    once_fails=$((once_fails + 1))
+    log warn "[once] start not ready in ${START_TIMEOUT}s (fails=${once_fails})"
+  else
+    once_fails=$((once_fails + 1))
+    log warn "[once] no start issued this round (fails=${once_fails})"
+  fi
+}
+
+# ----------------------------- 单次诊断 / 入口分发 ----------------------------
+case "${1:-}" in
+  check)
+    if port_up; then
+      echo "UP: dsh web serving on port ${PORT} (unit=$(unit_state))"
+      exit 0
+    fi
+    echo "DOWN: port ${PORT} not responding (unit=$(unit_state))"
+    exit 1
+    ;;
+  once)
+    shift
+    once_fails=0
+    once_main "$@"
+    exit 0
+    ;;
+  "")
+    : # 无参数 → 走下方常驻主循环
+    ;;
+  *)
+    echo "usage: dsh-watchdog [check|once]" >&2
+    exit 2
+    ;;
+esac
+
+# ----------------------------- 单实例锁 --------------------------------------
+exec 9>"$LOCKFILE"
+if ! flock -n 9; then
+  echo "another dsh-watchdog already running (lock=$LOCKFILE)" >&2
+  exit 1
+fi
+
+# ----------------------------- 主循环 ----------------------------------------
+fails=0; next_action=0; absolved=1; up_since=0; down_seen=0; activating_since=0; last_launch_ok=0
+
+log info "dsh-watchdog started port=${PORT} unit=${UNIT} countdown=${COUNTDOWN}s poll=${POLL}s systemd=$([ "$NO_SYSTEMD" = 1 ] && echo off || echo on)"
+log info "start command: $START_CMD"
+
+while true; do
+  if port_up; then
+    next_action=0
+    if [ "$down_seen" = 1 ]; then
+      log info "service UP again on port ${PORT}"
+      down_seen=0
+      up_since="$(date +%s)"
+    fi
+    if [ "$absolved" = 0 ] && [ $(( $(date +%s) - up_since )) -ge "$STABLE_WINDOW" ]; then
+      log info "stable >= ${STABLE_WINDOW}s, backoff reset"
+      absolved=1; fails=0
+    fi
+    sleep "$POLL"
+    continue
+  fi
+
+  # ── 端口不通 ──
+  st="$(unit_state)"
+  if [ "$st" = "activating" ]; then
+    # systemd 自己正在重启：短时间不干预；超过 60s 视为卡死，强制复位拉起
+    [ "$activating_since" -eq 0 ] && activating_since="$(date +%s)"
+    if [ $(( $(date +%s) - activating_since )) -gt 60 ]; then
+      log warn "unit stuck in auto-restart for >60s; forcing reset-failed + start $UNIT"
+      [ "$NO_SYSTEMD" != "1" ] && [ -n "$SYSTEMCTL" ] && {
+        "$SYSTEMCTL" --user reset-failed "$UNIT" >/dev/null 2>&1 || true
+        "$SYSTEMCTL" --user start "$UNIT" >/dev/null 2>&1 || true
+      }
+      activating_since=0
+      next_action=0
+    fi
+    sleep "$POLL"; continue
+  fi
+  activating_since=0
+
+  now="$(date +%s)"
+  if [ "$next_action" -gt "$now" ]; then
+    sleep "$POLL"; continue          # 还没到下一次动作时间
+  fi
+  next_action=0
+
+  # 崩溃循环计数：非 absolved 且仍处在本轮启动的稳定窗口内
+  if [ "$last_launch_ok" = 1 ] && [ "$up_since" -gt 0 ] && [ $(( now - up_since )) -lt "$STABLE_WINDOW" ]; then
+    fails=$((fails + 1))
+    log warn "crashed within ${STABLE_WINDOW}s of last start (fails=${fails})"
+  fi
+
+  # 正式流程：计数 3 秒 → 复查 →（退避）→ 拉起
+  log warn "SERVICE DOWN detected (port ${PORT}, unit=${st}); counting ${COUNTDOWN}s..."
+  down_seen=1
+  sleep "$COUNTDOWN"
+  if port_up; then
+    log info "came back during countdown (systemd or plugin restarter?), cancel start"
+    continue
+  fi
+  if [ "$fails" -gt 0 ]; then
+    sleep "$(backoff_at "$fails")"
+    if port_up; then
+      log info "came back during backoff, cancel start"
+      continue
+    fi
+  fi
+  do_start
+done
