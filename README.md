@@ -11,7 +11,7 @@ DeepSeek Harness 设置中心「关于」分区插件 —— **检查更新 + �
 - **版本信息**：当前 dsh 版本（npm 包 `@deepseek-ai/dsh`）、Web 前端版本、Node / 平台、项目主页。
 - **检查更新**：对比当前版本与 npm `latest` / `next` 两个 dist-tag 中较新者，提示发现新版本。
 - **版本选择**：列出 npm 上所有比当前新的版本（最多 10 个），弹窗选择安装。
-- **一键更新**：`npm install -g @deepseek-ai/dsh@<目标版本>`（固定官方 registry），成功后**自动重启 dsh web**（委托外部一次性看护 `~/.local/bin/dsh-watchdog once`：等宿主退出 → 数 3 秒 → 优先 systemd 拉起 `dsh-web`、退回原命令裸拉起（带 `--no-open`），端口就绪后**自动退出、零常驻**；决策日志 `~/.dsh/dsh-watchdog.log`）。
+- **一键更新**：`npm install -g @deepseek-ai/dsh@<目标版本>`（固定官方 registry），成功后**自动重启 dsh web**（委托外部一次性看护 `bin/dsh-watchdog once`：包内内置、随装随卸；等宿主退出 → 数 3 秒 → 优先 systemd 拉起 `dsh-web`、退回原命令裸拉起（带 `--no-open`），端口就绪后**自动退出、零常驻**；决策日志 `$DSH_HOME/dsh-watchdog.log`）。
 - **版本更新记录**：官方 GitHub Releases 最新 10 条，中文正文渲染，每日首次打开自动拉取一次并**保存到本地电脑**（`$DSH_HOME/dsh-about/releases-cache.json`），失败不会反复重试；点「刷新」可手动强刷。
 
 ## 安全性设计要点
@@ -21,34 +21,71 @@ DeepSeek Harness 设置中心「关于」分区插件 —— **检查更新 + �
 - `npm install -g` 带 5 分钟超时与进程组终止，安装输出尾部回显到弹窗便于排查。
 - 只有加载了本插件的 dsh 进程才获得这些能力；不修改任何核心文件，卸载即完全移除。
 
-## 安装
+## 安装（官方 dsh 插件机制）
 
-把你的 AI 指到本仓库，一句话即可：
-
-> 把 https://github.com/YannZhou/dsh-about 这个 dsh 插件装到 DeepSeek Harness 的 web profile 里。请按仓库里的 AI-INSTALL.md 执行。
-
-手动安装：
+本包遵循 dsh 官方插件安装形式：`dsh plugin --profile <name> add <包>`（内部由
+pnpm 安装 + `cordis.patch.yml` insert 层挂载 + dsh 客户端模块自动发现打包）。
+支持三种来源：
 
 ```sh
+# 1) 本仓库源码（开发调试）
 git clone https://github.com/YannZhou/dsh-about.git
-dsh plugin --profile web add ./dsh-about        # 在 dsh-about 的父目录执行；也可用绝对路径
+dsh plugin --profile web add /path/to/dsh-about
+
+# 2) GitHub 直接安装（推荐，一条命令，随仓库更新可 re-add 升级）
+dsh plugin --profile web add "git+https://github.com/YannZhou/dsh-about.git"
+
+# 3) npm 安装（发布后可用，见下方「发布到 npm」）
+dsh plugin --profile web add dsh-about
+```
+
+安装验证：
+
+```sh
 dsh --profile web --dump-config | grep dsh-about   # 应看到 - id: dsh-about 层
 ```
 
 然后重启 / 刷新 `dsh web`（默认 http://127.0.0.1:3080），打开 **设置 → 关于** 即可看到本分区。
+插件自带的 `bin/dsh-watchdog` 随包安装、随包卸载，无需任何手工放置。
 
 ## 验证
 
 - 配置树中应出现 `- id: dsh-about / name: dsh-about` 层（bundle 自动应用）。
 - 浏览器侧：设置 → 关于出现 DeepSeek 图标与版本行；点「检查更新」返回 npm 最新版本对比结果。
 
-## 卸载
+## 卸载（随时拔除，零残留）
 
 ```sh
+# 1) 官方移除（组合层 + 包文件，一步完成）
 dsh plugin --profile web remove dsh-about
 ```
 
-移除后插件行、依赖与浏览器侧组件一并消失，不残留。
+- **组合层**：`dsh.profile.bundles` 清单移除本包、`dependencies` 移除依赖，包内
+  `cordis.patch.yml`（dsh.bundle.patch 层）随之消失；重启后「关于」分区、
+  `/dsh-about/*` 路由、客户端 bundle 全部消失。无需手动改任何配置文件。
+- **包文件**：profile node_modules 内的 `dsh-about` 实体（含内置看护
+  `bin/dsh-watchdog`、卸载脚本）随包删除。
+- **进程**：更新链路的一次性看护进程端口就绪后自动退出，不驻留。
+
+运行期数据（`$DSH_HOME/dsh-about` 版本记录缓存、`$DSH_HOME/dsh-watchdog.log`、
+`$DSH_HOME/dsh-about-restart.log`、锁文件）由卸载钩子 `scripts/postuninstall.js`
+自动删除；注意 pnpm 对 link:/本地路径/tarball 安装的包**不执行**该钩子，此时请补跑兜底脚本：
+
+```sh
+# 2) 运行期残留清理（仅当 1 未自动清理时）
+bash scripts/uninstall.sh                                   # 克隆目录内
+# 或未克隆时：bash <(curl -fsSL https://raw.githubusercontent.com/YannZhou/dsh-about/v1.1.0/scripts/uninstall.sh)
+```
+
+唯一可选手动项：如果你曾执行过 `cp bin/dsh-watchdog ~/.local/bin/`（为独立使用
+`check`/`once` 命令），按需自行删除；插件本身不需要它。
+
+## 发布到 npm（可选）
+
+```sh
+# 包结构已符合从 npm 直接安装的官方形态（main/exports/dsh./files/bin/scripts 齐备）
+npm publish --access public
+```
 
 ## 架构简介
 
