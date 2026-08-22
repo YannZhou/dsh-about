@@ -74,7 +74,7 @@ dsh plugin --profile web remove dsh-about
 ```sh
 # 2) 运行期残留清理（仅当 1 未自动清理时）
 bash scripts/uninstall.sh                                   # 克隆目录内
-# 或未克隆时：bash <(curl -fsSL https://raw.githubusercontent.com/YannZhou/dsh-about/v1.1.0/scripts/uninstall.sh)
+# 或未克隆时：bash <(curl -fsSL https://raw.githubusercontent.com/YannZhou/dsh-about/v1.1.1/scripts/uninstall.sh)
 ```
 
 唯一可选手动项：如果你曾执行过 `cp bin/dsh-watchdog ~/.local/bin/`（为独立使用

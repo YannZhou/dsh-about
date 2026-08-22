@@ -7,7 +7,7 @@
 #
 # 用法（任选其一）：
 #   1) 克隆目录内：  bash scripts/uninstall.sh
-#   2) 未克隆：      bash <(curl -fsSL https://raw.githubusercontent.com/YannZhou/dsh-about/v1.1.0/scripts/uninstall.sh)
+#   2) 未克隆：      bash <(curl -fsSL https://raw.githubusercontent.com/YannZhou/dsh-about/v1.1.1/scripts/uninstall.sh)
 #
 # 只删除 dsh-about / dsh-watchdog 明确写入的路径，绝不越界删用户数据。
 set -u

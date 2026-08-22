@@ -1,6 +1,6 @@
 {
   "name": "dsh-about",
-  "version": "1.1.0",
+  "version": "1.1.1",
   "description": "DeepSeek Harness 设置中心「关于」分区：DeepSeek 图标 + 版本信息 + 检查更新（npm latest/next 取新）+ 一键更新与自动重启 + GitHub 版本更新记录",
   "type": "module",
   "main": "lib/index.js",
