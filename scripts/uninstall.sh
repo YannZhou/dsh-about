@@ -29,6 +29,21 @@ clean "$DSH_HOME_DIR/dsh-watchdog.log" "once 一次性看护决策日志"
 clean "$DSH_HOME_DIR/.dsh-watchdog.lock" "常驻看护单实例锁"
 clean "$DSH_HOME_DIR/.dsh-watchdog-once.lock" "once 锁"
 
+# ── 残留的包实体目录：pnpm remove 之后 node_modules/dsh-about 偶有遗留 ──
+# 仅当该 profile 的 package.json 已不再声明 dsh-about（dependencies/bundles 均无）
+# 时才删除，仍在声明中的安装绝不误删。
+for manifest in "$DSH_HOME_DIR"/profiles/*/package.json; do
+  [ -f "$manifest" ] || continue
+  prof_dir="$(dirname "$manifest")"
+  pkg_dir="$prof_dir/node_modules/dsh-about"
+  [ -d "$pkg_dir" ] || continue
+  if ! grep -q '"dsh-about"' "$manifest" 2>/dev/null; then
+    rm -rf -- "$pkg_dir"
+    echo "[dsh-about] 已清理残留: $pkg_dir (remove 后遗留的包实体目录)"
+    cleaned=$((cleaned + 1))
+  fi
+done
+
 if [ "$cleaned" -gt 0 ]; then
   echo "[dsh-about] 卸载完成：已清理 $cleaned 项运行期残留"
 else
