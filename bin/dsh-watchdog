@@ -113,6 +113,18 @@ start_service() {
       ;&
     unknown|nosystemd)
       # systemd 不可用/单元未知 → 直接裸命令拉起（绝不打开浏览器）
+      if [ "${DSH_WATCH_IN_TRANSIENT:-0}" = "1" ] && command -v systemd-run >/dev/null 2>&1; then
+        # 本次 once 运行在 systemd-run 的 transient 单元里：若直接 setsid 派发，
+        # once 退出（端口就绪）时 systemd 会清理该单元 cgroup，把刚拉起的 dsh
+        # 一起杀掉（实测确认）。所以裸拉起也包一层独立 transient 单元。
+        local raw_unit="dsh-web-raw-$(date +%s)"
+        log info "raw launch via systemd-run (unit=$raw_unit)"
+        systemd-run --user --collect --unit="$raw_unit" \
+          --setenv=PATH="${PATH:-/usr/local/bin:/usr/bin:/bin}" \
+          /usr/bin/bash -c "cd \"$HOME\" && exec $START_CMD" \
+          >>"$HOME/.dsh/dsh-web.log" 2>&1 &
+        return 0
+      fi
       # setsid --fork + exec：新会话、无残留包装进程；bash -c 而非 -l，避开登录 profile 副作用
       log info "raw launch: $START_CMD"
       setsid --fork bash -c "cd \"$HOME\" && exec $START_CMD" >>"$HOME/.dsh/dsh-web.log" 2>&1 &

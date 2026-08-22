@@ -12,6 +12,9 @@ DeepSeek Harness 设置中心「关于」分区插件 —— **检查更新 + �
 - **检查更新**：对比当前版本与 npm `latest` / `next` 两个 dist-tag 中较新者，提示发现新版本。
 - **版本选择**：列出 npm 上所有比当前新的版本（最多 10 个），弹窗选择安装。
 - **一键更新**：`npm install -g @deepseek-ai/dsh@<目标版本>`（固定官方 registry），成功后**自动重启 dsh web**（委托外部一次性看护 `bin/dsh-watchdog once`：包内内置、随装随卸；等宿主退出 → 数 3 秒 → 优先 systemd 拉起 `dsh-web`、退回原命令裸拉起（带 `--no-open`），端口就绪后**自动退出、零常驻**；决策日志 `$DSH_HOME/dsh-watchdog.log`）。
+  - 看护进程经 `systemd-run` 放入独立 transient 单元（独立 cgroup）——实测宿主退出时
+    systemd 会清空 dsh-web 服务 cgroup 内的一切子进程，普通 detached 派生必死；
+    transient 单元不受影响，更新后白屏无人拉起的根因即此。
 - **版本更新记录**：官方 GitHub Releases 最新 10 条，中文正文渲染，每日首次打开自动拉取一次并**保存到本地电脑**（`$DSH_HOME/dsh-about/releases-cache.json`），失败不会反复重试；点「刷新」可手动强刷。
 
 ## 安全性设计要点
@@ -74,7 +77,7 @@ dsh plugin --profile web remove dsh-about
 ```sh
 # 2) 运行期残留清理（仅当 1 未自动清理时）
 bash scripts/uninstall.sh                                   # 克隆目录内
-# 或未克隆时：bash <(curl -fsSL https://raw.githubusercontent.com/YannZhou/dsh-about/v1.1.1/scripts/uninstall.sh)
+# 或未克隆时：bash <(curl -fsSL https://raw.githubusercontent.com/YannZhou/dsh-about/v1.1.2/scripts/uninstall.sh)
 ```
 
 唯一可选手动项：如果你曾执行过 `cp bin/dsh-watchdog ~/.local/bin/`（为独立使用
