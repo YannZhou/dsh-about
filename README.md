@@ -10,6 +10,7 @@ DeepSeek Harness 设置中心「关于」分区插件 —— **检查更新 + �
 
 - **版本信息**：当前 dsh 版本（npm 包 `@deepseek-ai/dsh`）、Web 前端版本、Node / 平台、项目主页。
 - **检查更新**：对比当前版本与 npm `latest` / `next` 两个 dist-tag 中较新者，提示发现新版本。
+  - 附带 **GitHub 同步检测**（每次点「检查更新」都实时拉取 GitHub，成功后同步回写「版本更新记录」的当日缓存）：当 GitHub Releases 已发布但 npm 尚未同步时（如 `v0.1.2-alpha.1` 这类预发布），状态行会明确提示「GitHub 已发布 vX（npm 尚未发布，发布后即可一键更新）」；若该版本已存在 npm 但未打 `latest`/`next` 标签，则提示可手动安装；版本更新记录中对应条目会带「npm 未发布」角标。**npm 发布并打上 `latest`/`next` 标签后，提示与角标自动消失**；GitHub 发布新版本后，提示中的版本号自动跟随最新发布。
 - **版本选择**：列出 npm 上所有比当前新的版本（最多 10 个），弹窗选择安装。
 - **一键更新**：`npm install -g @deepseek-ai/dsh@<目标版本>`（固定官方 registry），成功后**自动重启 dsh web**（委托外部一次性看护 `bin/dsh-watchdog once`：包内内置、随装随卸；等宿主退出 → 数 3 秒 → 优先 systemd 拉起 `dsh-web`、退回原命令裸拉起（带 `--no-open`），端口就绪后**自动退出、零常驻**；决策日志 `$DSH_HOME/dsh-watchdog.log`）。
   - 看护进程经 `systemd-run` 放入独立 transient 单元（独立 cgroup）——实测宿主退出时
