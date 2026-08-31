@@ -9,15 +9,17 @@ DeepSeek Harness 设置中心「关于」分区插件 —— **检查更新 + �
 ## 功能特性
 
 - **版本信息**：当前 dsh 版本（npm 包 `@deepseek-ai/dsh`）、Web 前端版本、Node / 平台、项目主页。
-- **检查更新**：对比当前版本与 npm `latest` / `next` 两个 dist-tag 中较新者，提示发现新版本。
+- **检查更新**：对比当前版本与 npm `latest` / `next` **及全部其余 dist-tag（含 `alpha` 开发者预览版、`beta` 测试版）**中较新者，提示发现新版本。
+  - **预发布分级**：新版本按 semver 预发布标识符自动归类为 **开发者预览版（alpha，红色高风险角标）** / **Beta 测试版（橙色角标）** / **预览版（rc）** / 稳定版；检测到 alpha/beta 时在状态行与安装弹窗显示对应风险警告。
+  - **插件兼容性提醒**：任何版本更新（含稳定版）都会提示「版本更新后可能与某些插件不兼容，建议先关闭并退出所有插件再安装」。
   - 附带 **GitHub 同步检测**（每次点「检查更新」都实时拉取 GitHub）：当 GitHub Releases 已发布但 npm 尚未同步时（如 `v0.1.2-alpha.1` 这类预发布），状态行会明确提示「GitHub 已发布 vX（npm 尚未发布，发布后即可一键更新）」；若该版本已存在 npm 但未打 `latest`/`next` 标签，则提示可手动安装。**npm 发布并打上 `latest`/`next` 标签后，提示与角标自动消失**；GitHub 发布新版本后，提示中的版本号自动跟随最新发布。
   - **角标随列表常驻**：版本更新记录每次返回（打开页面 / 每日自动拉取 / 点「刷新」）都会当场对比一次 npm 注册表，「npm 未发布（或未标记 latest/next）」角标**随列表数据一起下发**——不依赖先点「检查更新」，刷新或重进设置页后标签依然存在；npm 一发布并打标签，对应角标自动消失。
-- **版本选择**：列出 npm 上所有比当前新的版本（最多 10 个），弹窗选择安装。
+- **版本选择**：列出 npm 上比当前新的版本（最多 10 个），**并合并 GitHub 已发布但 npm 未同步的版本**（如 `0.1.2-alpha.1`，标注「npm 未发布」，无法一键安装），弹窗选择安装。
 - **一键更新**：`npm install -g @deepseek-ai/dsh@<目标版本>`（固定官方 registry），成功后**自动重启 dsh web**（委托外部一次性看护 `bin/dsh-watchdog once`：包内内置、随装随卸；等宿主退出 → 数 3 秒 → 优先 systemd 拉起 `dsh-web`、退回原命令裸拉起（带 `--no-open`），端口就绪后**自动退出、零常驻**；决策日志 `$DSH_HOME/dsh-watchdog.log`）。
   - 看护进程经 `systemd-run` 放入独立 transient 单元（独立 cgroup）——实测宿主退出时
     systemd 会清空 dsh-web 服务 cgroup 内的一切子进程，普通 detached 派生必死；
     transient 单元不受影响，更新后白屏无人拉起的根因即此。
-- **版本更新记录**：官方 GitHub Releases 最新 10 条，中文正文渲染，每日首次打开自动拉取一次并**保存到本地电脑**（`$DSH_HOME/dsh-about/releases-cache.json`），失败不会反复重试；点「刷新」可手动强刷。
+- **版本更新记录**：官方 GitHub Releases 最新 10 条，中文正文渲染，**每条描述默认收起，点击头部箭头展开/收起**；每日首次打开自动拉取一次并**保存到本地电脑**（`$DSH_HOME/dsh-about/releases-cache.json`），失败不会反复重试；点「刷新」可手动强刷。
 
 ## 安全性设计要点
 
@@ -79,7 +81,7 @@ dsh plugin --profile web remove dsh-about
 ```sh
 # 2) 运行期残留清理（仅当 1 未自动清理时）
 bash scripts/uninstall.sh                                   # 克隆目录内
-# 或未克隆时：bash <(curl -fsSL https://raw.githubusercontent.com/YannZhou/dsh-about/v1.1.2/scripts/uninstall.sh)
+# 或未克隆时：bash <(curl -fsSL https://raw.githubusercontent.com/YannZhou/dsh-about/v1.2.0/scripts/uninstall.sh)
 ```
 
 唯一可选手动项：如果你曾执行过 `cp bin/dsh-watchdog ~/.local/bin/`（为独立使用
