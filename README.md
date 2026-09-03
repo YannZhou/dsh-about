@@ -1,159 +1,50 @@
 # dsh-about
 
-DeepSeek Harness 设置中心「关于」分区插件 —— **检查更新 + 一键更新**。
-
-> DeepSeek Harness 设置中心“About” tab: DeepSeek logo, version info, **check for updates** (npm `latest`/`next`), one-click update with auto-restart, and GitHub releases history.
+DeepSeek Harness 设置中心 **「关于」分区**插件 —— 版本信息、检查更新、一键更新、GitHub 版本更新记录。
 
 ![dsh-about 设置中心「关于」分区](./assets/dsh-about.png)
 
-## 功能特性
+## 功能
 
-- **版本信息**：当前 dsh 版本（npm 包 `@deepseek-ai/dsh`）、Web 前端版本、Node / 平台、项目主页。
-- **检查更新**：对比当前版本与 npm `latest` / `next` **及全部其余 dist-tag（含 `alpha` 开发者预览版、`beta` 测试版）**中较新者，提示发现新版本。
-  - **预发布分级**：新版本按 semver 预发布标识符自动归类为 **开发者预览版（alpha，红色高风险角标）** / **Beta 测试版（橙色角标）** / **预览版（rc）** / 稳定版；检测到 alpha/beta 时在状态行与安装弹窗显示对应风险警告。
-  - **插件兼容性提醒**：任何版本更新（含稳定版）都会提示「版本更新后可能与某些插件不兼容，建议先关闭并退出所有插件再安装」。
-  - 附带 **GitHub 同步检测**（每次点「检查更新」都实时拉取 GitHub）：当 GitHub Releases 已发布但 npm 尚未同步时（如 `v0.1.2-alpha.1` 这类预发布），状态行会明确提示「GitHub 已发布 vX（npm 尚未发布，发布后即可一键更新）」；若该版本已存在 npm 但未打 `latest`/`next` 标签，则提示可手动安装。**npm 发布并打上 `latest`/`next` 标签后，提示与角标自动消失**；GitHub 发布新版本后，提示中的版本号自动跟随最新发布。
-  - **角标随列表常驻**：版本更新记录每次返回（打开页面 / 每日自动拉取 / 点「刷新」）都会当场对比一次 npm 注册表，「npm 未发布（或未标记 latest/next）」角标**随列表数据一起下发**——不依赖先点「检查更新」，刷新或重进设置页后标签依然存在；npm 一发布并打标签，对应角标自动消失。
-- **更新源选择**：检查更新与一键更新所用的 npm registry 可选 **国外官方**（registry.npmjs.org，默认）/ **国内镜像**（registry.npmmirror.com，国内访问更快，同步存在轻微延迟）/ **本地配置**（跟随 `npm config get registry`）；UI 为紧凑**下拉菜单**（设置 → 关于 → 更新源），切换即时生效并持久化到 `$DSH_HOME/dsh-about/source.json`（随插件卸载清理），所有 npm 请求（dist-tags / packument / 安装）统一走选中源，保证「查到哪个源就在哪个源安装」一致。
-  - **延迟检测**：下拉列表中每个源右侧显示「未检测」，**点击即测该源**连通性并显示实测毫秒延迟；只标记被点击的那个源为「检测中…」，其余源不受影响；连不上标红「不可达」，可随时点重新检测。检测在宿主侧发起（走 dsh 所在机器的网络，与安装路径一致）。
-  - **开合动画**：下拉展开时淡入并轻微上滑展开，收起时平滑折叠（响应系统「减弱动态效果」偏好时自动关闭动画）。
-- **版本选择**：列出 npm 上比当前新的版本（最多 10 个），**并合并 GitHub 已发布但 npm 未同步的版本**（如 `0.1.2-alpha.1`，标注「npm 未发布」，无法一键安装），弹窗选择安装。
-- **一键更新**：`npm install -g @deepseek-ai/dsh@<目标版本>`（走当前选中的 npm 源），成功后**自动重启 dsh web**（委托外部一次性看护 `dsh-watchdog once`：包内内置、随装随卸，**Windows / macOS / Linux 三平台可用**；等宿主退出 → 数 3 秒 → 优先 systemd 拉起 `dsh-web`、退回原命令裸拉起（带 `--no-open`），端口就绪后**自动退出、零常驻**；决策日志 `$DSH_HOME/dsh-watchdog.log`）。
-  - **跨平台看护**：`bin/dsh-watchdog.mjs`（纯 Node）是三平台首选——node 是 dsh 运行时必有依赖，**零新增依赖**，Windows / macOS / Linux 同一套；`bin/dsh-watchdog`（bash）保留给 Linux「常驻主循环 + systemd 用户服务」高级场景，并在极少数无 node 环境兜底。
-  - **Linux + systemd-run**：看护进程放进独立 transient 单元（独立 cgroup）——实测宿主退出时
-    systemd 会清空 dsh-web 服务 cgroup 内的一切子进程，普通 detached 派生必死；
-    transient 单元不受影响，更新后白屏无人拉起的根因即此。
-  - **macOS / Windows**：无 systemd，宿主 detached 派生 Node 看护即可；Windows 下
-    npm 安装走 `npm.cmd`（shell 解析）、进程树终止走 `taskkill /T /F`，均已适配。
-- **版本更新记录**：官方 GitHub Releases 最新 10 条，中文正文渲染，**每条描述默认收起，点击头部箭头展开/收起**；每日首次打开自动拉取一次并**保存到本地电脑**（`$DSH_HOME/dsh-about/releases-cache.json`），失败不会反复重试；点「刷新」可手动强刷。
+- **版本信息**：dsh（npm 包）、Web 前端、Node / 平台与项目主页展示。
+- **检查更新**：对比 npm `latest` / `next` 及全部预发布 tag（`alpha` / `beta`），自动分级提示风险。
+- **一键更新**：`npm install -g` 走所选源，装完自动重启 dsh web；跨平台（Windows / macOS / Linux）看护，零常驻。
+- **更新源切换**：官方 npm / npmmirror 国内镜像 / 跟随本地配置，下拉即时切换，点击即可实测延迟。
+- **版本更新记录**：官方 GitHub Releases 最新 10 条，中文渲染、默认收起，每日自动拉取缓存到本地。
+- **GitHub 同步检测**：Release 已发布而 npm 未同步时明确提示，npm 发布后角标自动消失。
 
-## 安全性设计要点
+## 安装
 
-- 宿主路由 `/dsh-about/*` **仅允许回环地址**访问（DNS 重绑定防护），跨站 GET 用 `Sec-Fetch-Site` 拦下，跨站 POST 用 `Origin` 白名单 + `application/json` 预检双重防护（CSRF）。
-- `/update` 是破坏性端点：并发互斥（同一时刻只允许一个安装任务）、目标版本号必须**已存在于 npm 注册表**且比当前新。
-- `npm install -g` 带 5 分钟超时与进程组终止，安装输出尾部回显到弹窗便于排查。
-- 只有加载了本插件的 dsh 进程才获得这些能力；不修改任何核心文件，卸载即完全移除。
+前提：已安装 DeepSeek Harness（`npm i -g @deepseek-ai/dsh`，Node ≥ 18）。
 
-## 安装（官方 dsh 插件机制）
-
-本包遵循 dsh 官方插件安装形式：`dsh plugin --profile <name> add <包>`（内部由
-pnpm 安装 + `cordis.patch.yml` insert 层挂载 + dsh 客户端模块自动发现打包）。
-支持三种来源：
+两种来源任选其一：
 
 ```sh
-# 1) 本仓库源码（开发调试）
-git clone https://github.com/YannZhou/dsh-about.git
-dsh plugin --profile web add /path/to/dsh-about
-
-# 2) GitHub 直接安装（推荐，一条命令，随仓库更新可 re-add 升级）
+# GitHub 安装
 dsh plugin --profile web add "git+https://github.com/YannZhou/dsh-about.git"
 
-# 3) npm 安装（scoped 包，已发布，见下方「发布到 npm」）
+# npm 安装（scoped 包）
 dsh plugin --profile web add @yannzhou/dsh-about
 ```
 
-安装验证：
+装完重启 / 刷新 `dsh web`（默认 http://127.0.0.1:3080），打开 **设置 → 关于** 即可看到本分区。
 
-```sh
-dsh --profile web --dump-config | grep -A1 "dsh-about"
-# 三种来源安装后形态一致，应看到（来源注释行 + patch 层）：
-#   # == @yannzhou/dsh-about      ← 依赖名（来源注释行，npm / git / link 一致）
-#   - id: dsh-about                ← patch 层 id/name，由包内声明决定
-#     name: dsh-about
-```
-
-然后重启 / 刷新 `dsh web`（默认 http://127.0.0.1:3080），打开 **设置 → 关于** 即可看到本分区。
-插件自带的看护（`bin/dsh-watchdog.mjs` 跨平台 Node 版 + `bin/dsh-watchdog` Linux bash 版）
-随包安装、随包卸载，无需任何手工放置。
-
-## 验证
-
-- 配置树中应出现本包 bundle 层。注意区分两个层级（均已实证）：
-  - **依赖层**：`dependencies` / `dsh.profile.bundles` 里的名字是包内
-    `package.json` 的 `name`——现为 scoped 名 `@yannzhou/dsh-about`，
-    三种安装来源（源码 / GitHub / npm）都一样。
-  - **patch 层**：`--dump-config` 组合出的层 `- id: dsh-about / name: dsh-about`
-    取自包内 `cordis.patch.yml` 与 `lib/index.js` 的 `export const name`，
-    与依赖名（npm 包名）无关，三种来源也一致。
-- 浏览器侧：设置 → 关于出现 DeepSeek 图标与版本行；点「检查更新」返回 npm 最新版本对比结果。
-
-## 卸载（随时拔除，零残留）
-
-`dsh plugin remove <名>` 会原样转发给 pnpm，**按 package.json `dependencies`
-里的依赖名删除**（reconcile 同时把同名 bundle 从 `dsh.profile.bundles` 摘掉），
-因此卸载命令须与该依赖名一致。本包 `name` 现为 `@yannzhou/dsh-about`，
-**无论源码 / GitHub / npm 哪种来源，安装后依赖名都是它**：
+## 卸载
 
 ```sh
 dsh plugin --profile web remove @yannzhou/dsh-about
 ```
 
-> 兼容旧实例：若某 profile 是在本包改名（裸名 `dsh-about` → scoped
-> `@yannzhou/dsh-about`）**之前**装的，那一份依赖名是裸名 `dsh-about`，
-> 对该实例请用 `dsh plugin --profile web remove dsh-about`。
+> 改名前的旧实例请用裸名卸载：`dsh plugin --profile web remove dsh-about`。
+> 运行期数据由卸载钩子自动清理，零残留。
 
-- **组合层**：`dsh.profile.bundles` 清单移除本包、`dependencies` 移除依赖，包内
-  `cordis.patch.yml`（dsh.bundle.patch 层）随之消失；重启后「关于」分区、
-  `/dsh-about/*` 路由、客户端 bundle 全部消失。无需手动改任何配置文件。
-- **包文件**：profile node_modules 内对应依赖实体（含内置看护
-  `bin/dsh-watchdog.mjs` / `bin/dsh-watchdog`、卸载脚本）随包删除。
-- **进程**：更新链路的一次性看护进程端口就绪后自动退出，不驻留。
+## 更多文档
 
-运行期数据（`$DSH_HOME/dsh-about` 插件数据目录——版本记录缓存与更新源选择、`$DSH_HOME/dsh-watchdog.log`、
-`$DSH_HOME/dsh-about-restart.log`、锁文件）由卸载钩子 `scripts/postuninstall.js`
-自动删除。npm（registry）安装会正常触发该钩子，卸载即自动清理；仅 pnpm 对
-`link:`/本地路径/`file:` tarball 安装的包**不执行**该钩子，此时请补跑兜底脚本：
-
-```sh
-# 2) 运行期残留清理（仅当 1 未自动清理时）
-bash scripts/uninstall.sh                                   # 克隆目录内
-# 或未克隆时：bash <(curl -fsSL https://raw.githubusercontent.com/YannZhou/dsh-about/v1.5.0/scripts/uninstall.sh)
-```
-
-唯一可选手动项：如果你曾执行过 `cp bin/dsh-watchdog ~/.local/bin/`（为独立使用
-`check`/`once` 命令），按需自行删除；插件本身不需要它。
-
-## 发布到 npm（可选）
-
-包已发布为 **scoped 包 `@yannzhou/dsh-about`**（npm Granular 令牌体系下对
-无前缀裸包名无法授予写权限，故采用与账号作用域一致的 scoped 名）。包结构已符合
-从 npm 直接安装的官方形态（main/exports/dsh./files/bin/scripts 齐备）：
-
-```sh
-# 1) 先登录/准备有 @yannzhou 作用域写权限的令牌（whoami 应为 yannzhou）
-# 2) scoped 包默认走 private，必须显式 --access public 才能公开分发
-npm publish --access public
-
-# 验证（匿名可查可装即成功）
-npm view @yannzhou/dsh-about version        # 应输出版本号
-npm install -g @yannzhou/dsh-about          # 匿名安装应成功
-```
-
-> npm 安装来源（见上「安装」第 3 条）：`dsh plugin --profile web add @yannzhou/dsh-about`。
->
-> 区分两层名字，别混淆：
-> - **npm 包名 / profile 依赖名**：`@yannzhou/dsh-about`。`remove` 与
->   `dependencies` / `bundles` 清单都用它：
->   `dsh plugin --profile web remove @yannzhou/dsh-about`。
-> - **cordis id / patch 层 id 与 name**：`dsh-about`（由 `lib/index.js` 的
->   `export const name` 与 `cordis.patch.yml` 决定）。`--dump-config` 输出的层
->   `- id: dsh-about / name: dsh-about` 就是它；`grep dsh-about` 可匹配到两种来源的层。
-
-## 架构简介
-
-双半体插件，两个文件，零构建：
-
-| 文件 | 半体 | 职责 |
-|---|---|---|
-| `lib/index.js` | 宿主（Cordis loader 行） | 注册 `/dsh-about/{source,ping,describe,releases,check,versions,update}` 同源 HTTP 路由；更新源选择与持久化（`$DSH_HOME/dsh-about/source.json`）与延迟检测；npm dist-tag / packument / GitHub Releases 拉取；`npm install -g` 执行与自动重启看护 |
-| `lib/client.js` | 浏览器（`window.__ModuleLoader__` 模块） | 注册 `settings.section`（id: `about`，导航「关于」）组件：图标、版本行、更新源选择（下拉菜单，点各源「未检测」即测延迟）、检查更新/一键更新弹窗、版本更新记录（数据由宿主落盘，浏览器不再用 localStorage） |
-
-- 宿主行由 `cordis.patch.yml`（`dsh.bundle.patch`）挂载；浏览器半体由包内 `dsh.client` 清单 + `exports["./client"]` 自动发现打包（`@deepseek-ai/dsh-client-modules` 机制）。
-- **零运行时依赖**：semver 已内嵌（`lib/semver.js`，语义与 node-semver 对齐并通过全量对拍）。`dsh plugin add <目录>` 走 `link:` 协议时不携带外部依赖，因此 clone 即可装、即装即用。
-
-## 兼容性
-
-- dsh CLI ≥ 0.x（支持 `dsh plugin --profile <name> add/remove` 与 `cordis.patch.yml` insert 层）。
+| 文档 | 内容 |
+|---|---|
+| [docs/INSTALL.md](docs/INSTALL.md) | 完整安装 / 验证 / 卸载 / 故障排查 |
+| [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | 架构简介与安全性设计 |
+| [docs/NPM-PUBLISH.md](docs/NPM-PUBLISH.md) | 发布到 npm（维护者向） |
 
 ## License
 
