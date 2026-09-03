@@ -48,6 +48,22 @@ cd dsh-about                    # $PLUGIN_DIR 即此目录
 ls "$PLUGIN_DIR"                 # 应包含 package.json、cordis.patch.yml、lib/、AI-INSTALL.md
 ```
 
+### 可选：从 npm 直装（无需 clone）
+
+本插件也发布在 npm（scoped 包 `@yannzhou/dsh-about`）。若目标机器可访问
+registry.npmjs.org 且人类同意走 registry，可跳过 clone，直接安装：
+
+```sh
+dsh plugin --profile web add @yannzhou/dsh-about
+```
+
+- 此方式与源码目录安装等价：pnpm 一律以包内 `package.json` 的 `name`
+  （`@yannzhou/dsh-about`）作为依赖名写入 `dependencies` 与
+  `dsh.profile.bundles`；patch 层的 `id/name` 仍取自包内 `cordis.patch.yml`，
+  为 `dsh-about`。验证与卸载命令（见第 4、6 节）三种来源完全一致。
+- 若走此方式，第 3 节及以下"从目录装"步骤可跳过；卸载命令不变，仍是
+  `dsh plugin --profile web remove @yannzhou/dsh-about`。
+
 ## 3. 安装 bundle / Install the bundle
 
 在 `$PLUGIN_DIR` 的**父目录**执行（关键：不要把 `add` 的路径指向仓库目录自身所在的
@@ -69,16 +85,18 @@ dsh plugin --profile web add "$PLUGIN_DIR"
 ## 4. 验证激活 / Verify activation
 
 ```sh
-dsh --profile web --dump-config | grep -A2 "dsh-about"
+dsh --profile web --dump-config | grep -A1 "dsh-about"
 ```
 
-期望输出（bundle 层已应用）：
+期望输出（来源注释行 + patch 层均已应用）：
 
 ```
-# == .../cordis.patch.yml  (bundle: dsh-about 层或 profile 层)
-- id: dsh-about
+# == @yannzhou/dsh-about     ← 依赖名注释（npm / git / link 源码安装一致）
+- id: dsh-about              ← patch 层 id/name，取自包内 cordis.patch.yml
   name: dsh-about
 ```
+
+只关心 patch 层是否挂上时可 `grep "^- id: dsh-about$"` 看 `- id: dsh-about`。
 
 再核对浏览器半体声明可被解析（web 前端在组合图重建后会自动发现并打包 client 半体，
 无需任何额外步骤）：
@@ -102,11 +120,22 @@ node -e "const p=require('$PLUGIN_DIR/package.json'); console.log(p.dsh.client.p
 
 ## 6. 卸载（供回滚参考）/ Uninstall
 
+`remove` 按 package.json `dependencies` 依赖名匹配。本包 `name` 为
+`@yannzhou/dsh-about`，无论源码 / GitHub / npm 哪种来源安装后依赖名都一致：
+
 ```sh
-dsh plugin --profile web remove dsh-about
+dsh plugin --profile web remove @yannzhou/dsh-about
 ```
 
-移除后配置树不再含 dsh-about 行；浏览器刷新后「关于」分区消失。
+> 兼容旧实例：若目标 profile 里的 dsh-about 是改名前的裸名版本遗留，
+> 依赖名为 `dsh-about`，对该实例改用
+> `dsh plugin --profile web remove dsh-about`。
+
+移除后配置树不再含对应 dsh-about 行；浏览器刷新后「关于」分区消失。
+
+> 运行期数据（`$DSH_HOME/dsh-about`、`$DSH_HOME/dsh-watchdog.log` 等）由包内卸载钩子
+> `scripts/postuninstall.js` 自动清理；仅 pnpm 对 `link:`/本地路径安装不执行该钩子，
+> 此时请补跑 `bash scripts/uninstall.sh`（见仓库 README「卸载」一节）。
 
 ## 7. 故障排查 / Troubleshooting
 

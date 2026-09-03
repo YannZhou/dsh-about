@@ -48,14 +48,18 @@ dsh plugin --profile web add /path/to/dsh-about
 # 2) GitHub 直接安装（推荐，一条命令，随仓库更新可 re-add 升级）
 dsh plugin --profile web add "git+https://github.com/YannZhou/dsh-about.git"
 
-# 3) npm 安装（发布后可用，见下方「发布到 npm」）
-dsh plugin --profile web add dsh-about
+# 3) npm 安装（scoped 包，已发布，见下方「发布到 npm」）
+dsh plugin --profile web add @yannzhou/dsh-about
 ```
 
 安装验证：
 
 ```sh
-dsh --profile web --dump-config | grep dsh-about   # 应看到 - id: dsh-about 层
+dsh --profile web --dump-config | grep -A1 "dsh-about"
+# 三种来源安装后形态一致，应看到（来源注释行 + patch 层）：
+#   # == @yannzhou/dsh-about      ← 依赖名（来源注释行，npm / git / link 一致）
+#   - id: dsh-about                ← patch 层 id/name，由包内声明决定
+#     name: dsh-about
 ```
 
 然后重启 / 刷新 `dsh web`（默认 http://127.0.0.1:3080），打开 **设置 → 关于** 即可看到本分区。
@@ -64,26 +68,41 @@ dsh --profile web --dump-config | grep dsh-about   # 应看到 - id: dsh-about �
 
 ## 验证
 
-- 配置树中应出现 `- id: dsh-about / name: dsh-about` 层（bundle 自动应用）。
+- 配置树中应出现本包 bundle 层。注意区分两个层级（均已实证）：
+  - **依赖层**：`dependencies` / `dsh.profile.bundles` 里的名字是包内
+    `package.json` 的 `name`——现为 scoped 名 `@yannzhou/dsh-about`，
+    三种安装来源（源码 / GitHub / npm）都一样。
+  - **patch 层**：`--dump-config` 组合出的层 `- id: dsh-about / name: dsh-about`
+    取自包内 `cordis.patch.yml` 与 `lib/index.js` 的 `export const name`，
+    与依赖名（npm 包名）无关，三种来源也一致。
 - 浏览器侧：设置 → 关于出现 DeepSeek 图标与版本行；点「检查更新」返回 npm 最新版本对比结果。
 
 ## 卸载（随时拔除，零残留）
 
+`dsh plugin remove <名>` 会原样转发给 pnpm，**按 package.json `dependencies`
+里的依赖名删除**（reconcile 同时把同名 bundle 从 `dsh.profile.bundles` 摘掉），
+因此卸载命令须与该依赖名一致。本包 `name` 现为 `@yannzhou/dsh-about`，
+**无论源码 / GitHub / npm 哪种来源，安装后依赖名都是它**：
+
 ```sh
-# 1) 官方移除（组合层 + 包文件，一步完成）
-dsh plugin --profile web remove dsh-about
+dsh plugin --profile web remove @yannzhou/dsh-about
 ```
+
+> 兼容旧实例：若某 profile 是在本包改名（裸名 `dsh-about` → scoped
+> `@yannzhou/dsh-about`）**之前**装的，那一份依赖名是裸名 `dsh-about`，
+> 对该实例请用 `dsh plugin --profile web remove dsh-about`。
 
 - **组合层**：`dsh.profile.bundles` 清单移除本包、`dependencies` 移除依赖，包内
   `cordis.patch.yml`（dsh.bundle.patch 层）随之消失；重启后「关于」分区、
   `/dsh-about/*` 路由、客户端 bundle 全部消失。无需手动改任何配置文件。
-- **包文件**：profile node_modules 内的 `dsh-about` 实体（含内置看护
+- **包文件**：profile node_modules 内对应依赖实体（含内置看护
   `bin/dsh-watchdog.mjs` / `bin/dsh-watchdog`、卸载脚本）随包删除。
 - **进程**：更新链路的一次性看护进程端口就绪后自动退出，不驻留。
 
 运行期数据（`$DSH_HOME/dsh-about` 插件数据目录——版本记录缓存与更新源选择、`$DSH_HOME/dsh-watchdog.log`、
 `$DSH_HOME/dsh-about-restart.log`、锁文件）由卸载钩子 `scripts/postuninstall.js`
-自动删除；注意 pnpm 对 link:/本地路径/tarball 安装的包**不执行**该钩子，此时请补跑兜底脚本：
+自动删除。npm（registry）安装会正常触发该钩子，卸载即自动清理；仅 pnpm 对
+`link:`/本地路径/`file:` tarball 安装的包**不执行**该钩子，此时请补跑兜底脚本：
 
 ```sh
 # 2) 运行期残留清理（仅当 1 未自动清理时）
@@ -96,10 +115,29 @@ bash scripts/uninstall.sh                                   # 克隆目录内
 
 ## 发布到 npm（可选）
 
+包已发布为 **scoped 包 `@yannzhou/dsh-about`**（npm Granular 令牌体系下对
+无前缀裸包名无法授予写权限，故采用与账号作用域一致的 scoped 名）。包结构已符合
+从 npm 直接安装的官方形态（main/exports/dsh./files/bin/scripts 齐备）：
+
 ```sh
-# 包结构已符合从 npm 直接安装的官方形态（main/exports/dsh./files/bin/scripts 齐备）
+# 1) 先登录/准备有 @yannzhou 作用域写权限的令牌（whoami 应为 yannzhou）
+# 2) scoped 包默认走 private，必须显式 --access public 才能公开分发
 npm publish --access public
+
+# 验证（匿名可查可装即成功）
+npm view @yannzhou/dsh-about version        # 应输出版本号
+npm install -g @yannzhou/dsh-about          # 匿名安装应成功
 ```
+
+> npm 安装来源（见上「安装」第 3 条）：`dsh plugin --profile web add @yannzhou/dsh-about`。
+>
+> 区分两层名字，别混淆：
+> - **npm 包名 / profile 依赖名**：`@yannzhou/dsh-about`。`remove` 与
+>   `dependencies` / `bundles` 清单都用它：
+>   `dsh plugin --profile web remove @yannzhou/dsh-about`。
+> - **cordis id / patch 层 id 与 name**：`dsh-about`（由 `lib/index.js` 的
+>   `export const name` 与 `cordis.patch.yml` 决定）。`--dump-config` 输出的层
+>   `- id: dsh-about / name: dsh-about` 就是它；`grep dsh-about` 可匹配到两种来源的层。
 
 ## 架构简介
 
