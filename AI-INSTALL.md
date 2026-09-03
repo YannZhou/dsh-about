@@ -92,9 +92,13 @@ dsh --profile web --dump-config | grep -A1 "dsh-about"
 
 ```
 # == @yannzhou/dsh-about     ← 依赖名注释（npm / git / link 源码安装一致）
-- id: dsh-about              ← patch 层 id/name，取自包内 cordis.patch.yml
-  name: dsh-about
+- id: dsh-about              ← patch 层 id（插件 cordis 标识）
+  name: '@yannzhou/dsh-about' ← patch 层 name（= 包名，供新版 dsh client-modules 按包名注册）
 ```
+
+> 注意：`name` 必须是 **scoped 包名 `@yannzhou/dsh-about`**，而不是裸名 `dsh-about`。
+> 新版 dsh（0.1.2+）的客户端模块系统按「包自身 name」给插件建图，`cordis.patch.yml` 的
+> `name` 与 `lib/client.js` 的 `window.__ModuleLoader__.load({id})` 都须与之保持一致。
 
 只关心 patch 层是否挂上时可 `grep "^- id: dsh-about$"` 看 `- id: dsh-about`。
 

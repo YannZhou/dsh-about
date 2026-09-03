@@ -197,7 +197,7 @@ proc_starttime() { # $1=pid → /proc/<pid>/stat 的 starttime；comm 可能含�
   rest="$(cat "/proc/$1/stat" 2>/dev/null)" || return 1
   rest="${rest##*) }"
   set -- $rest
-  echo "$20"
+  echo "${20}"
 }
 pid_alive() { # $1=pid $2=期望 starttime（可空）：进程在且身份吻合 → 0
   [ -d "/proc/$1" ] || return 1

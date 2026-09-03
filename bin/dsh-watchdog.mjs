@@ -76,7 +76,9 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 function hasBin(cmd) {
 	if (isWin) return spawnSync("where", [cmd], { stdio: "ignore", shell: true }).status === 0;
-	return spawnSync("which", [cmd], { stdio: "ignore" }).status === 0;
+	// 用 `command -v` 而非 `which`：极简 Linux 容器/系统可能未装 which（debianutils
+	// 成员），而 command -v 是 POSIX 内建、恒可用。
+	return spawnSync("sh", ["-c", `command -v ${cmd} >/dev/null 2>&1`]).status === 0;
 }
 const HAS_SYSTEMCTL = !NO_SYSTEMD && !isWin && hasBin("systemctl");
 const HAS_SYSTEMD_RUN = !NO_SYSTEMD && !isWin && hasBin("systemd-run");
@@ -108,8 +110,12 @@ function procFingerprint(pidNum) {
 	if (isLinux) {
 		try {
 			const stat = readFileSync(`/proc/${pidNum}/stat`, "utf8");
-			const rest = stat.slice(stat.indexOf(")") + 2).trim(); // 去掉 "pid (comm) "
-			return rest.split(/\s+/)[21] ?? null; // field 22 = starttime
+			// comm 可能含空格/括号：用最后一个 ")" 作为 (comm) 的边界（内核会把 comm
+			// 括进一对括号，含 ")" 的命令名不会转义，故只能取 lastIndexOf）。
+			const rest = stat.slice(stat.lastIndexOf(")") + 2).trim();
+			// rest 从 field 3（state）开始，字段22 = starttime → 0 基索引 19。
+			// 取错索引会落到 rss 等运行期变化字段，导致 PID 指纹不稳定。
+			return rest.split(/\s+/)[19] ?? null; // field 22 = starttime
 		} catch {
 			return null;
 		}

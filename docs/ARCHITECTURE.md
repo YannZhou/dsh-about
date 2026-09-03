@@ -39,3 +39,23 @@
 ## 兼容性
 
 - dsh CLI ≥ 0.x（支持 `dsh plugin --profile <name> add/remove` 与 `cordis.patch.yml` insert 层）。
+
+### 包名三层约定（重要）
+
+本包对外用 **scoped 包名 `@yannzhou/dsh-about`**（npm 发布名 / profile 依赖名 / 客户端模块注册名），
+对内用 **裸名 `dsh-about`** 作为插件身份（cordis `id`、HTTP 路由前缀 `/dsh-about/*`、设置分区 `id: "about"`）。
+
+三层必须一致，否则新版 dsh 会静默出问题：
+
+| 位置 | 取值 | 作用 |
+|---|---|---|
+| `package.json` `name` | `@yannzhou/dsh-about` | npm 发布名 / 依赖名 |
+| `cordis.patch.yml` `- insert[].name` | `@yannzhou/dsh-about` | 宿主导入说明符；dsh 0.1.2+ 按「包自身 name」建客户端图 |
+| `lib/client.js` `load({ id })` | `@yannzhou/dsh-about` | 客户端模块注册键，须匹配 client-modules 图行 |
+| 插件内部（`PLUGIN_ID`/`export const name`/路由前缀） | `dsh-about` | 插件身份，可保持不变 |
+| `cordis.patch.yml` `- insert[].id` | `dsh-about` | 插件 cordis id |
+
+> **为什么必须双层一致**：新版 dsh（0.1.2+）的 `@deepseek-ai/dsh-client-modules` 在把插件纳入
+> 客户端启动图时，会用「loader 条目名」与「包自身 `name`」做严格比对，不相等就丢弃、不纳入图。
+> 旧版 dsh（≤0.1.1）接受裸名 `dsh-about`；从 0.1.2 起必须用包名 `@yannzhou/dsh-about`。
+> 若只改宿主侧不改客户端注册键，宿主 `/dsh-about/*` 路由正常但客户端「关于」分区静默不渲染、无报错。

@@ -7,7 +7,7 @@
 #
 # 用法（任选其一）：
 #   1) 克隆目录内：  bash scripts/uninstall.sh
-#   2) 未克隆：      bash <(curl -fsSL https://raw.githubusercontent.com/YannZhou/dsh-about/v1.5.0/scripts/uninstall.sh)
+#   2) 未克隆：      bash <(curl -fsSL https://raw.githubusercontent.com/YannZhou/dsh-about/v1.6.0/scripts/uninstall.sh)
 #
 # 只删除 dsh-about / dsh-watchdog 明确写入的路径，绝不越界删用户数据。
 set -u
@@ -40,13 +40,18 @@ clean "$DSH_HOME_DIR/.dsh-watchdog-once.lock" "once 锁"
 # 注意：本脚本应在 `dsh plugin --profile <name> remove dsh-about` 完成之后再跑，
 # 此时各 profile 清单已是最新（bundles 已对账），判断才准确。
 
-# 先汇总：是否仍有 profile 声明 dsh-about（决定共享镜像/回退镜像是否可删）
+# 包名双形态：scoped @yannzhou/dsh-about（当前发布名）与旧裸名 dsh-about（改名前的遗留安装）。
+# 「是否仍在声明」须命中两者；实体目录同理，两种形态各探一次。
+# 注意：grep -E 的 alternation 用裸 |（ERE），写成 \| 只会匹配字面竖线。
+declared() { grep -qE "\"(@yannzhou/dsh-about|dsh-about)\"" "$1" 2>/dev/null; }
+
+# 先汇总：是否仍有 profile 声明本包（决定共享镜像/回退镜像是否可删）
 still_declared=0
 for manifest in "$DSH_HOME_DIR"/profiles/*/package.json; do
   [ -f "$manifest" ] || continue
-  if grep -q '"dsh-about"' "$manifest" 2>/dev/null; then
+  if declared "$manifest"; then
     still_declared=1
-    echo "[dsh-about] 检测到 profile 仍声明 dsh-about，保留其所有安装实体: $manifest"
+    echo "[dsh-about] 检测到 profile 仍声明本包，保留其所有安装实体: $manifest"
     break
   fi
 done
@@ -55,46 +60,51 @@ done
 for manifest in "$DSH_HOME_DIR"/profiles/*/package.json; do
   [ -f "$manifest" ] || continue
   prof_dir="$(dirname "$manifest")"
-  pkg_dir="$prof_dir/node_modules/dsh-about"
-  if [ -e "$pkg_dir" ] || [ -L "$pkg_dir" ]; then
-    # 该 profile 清单仍声明 → 保留（独立判断，互不牵连）
-    if grep -q '"dsh-about"' "$manifest" 2>/dev/null; then
-      echo "[dsh-about] 保留（仍在声明中）: $pkg_dir"
-    else
-      rm -rf -- "$pkg_dir"
-      echo "[dsh-about] 已清理残留: $pkg_dir (remove 后遗留的包实体目录)"
-      cleaned=$((cleaned + 1))
+  for name in @yannzhou/dsh-about dsh-about; do
+    pkg_dir="$prof_dir/node_modules/$name"
+    if [ -e "$pkg_dir" ] || [ -L "$pkg_dir" ]; then
+      if declared "$manifest"; then
+        echo "[dsh-about] 保留（仍在声明中）: $pkg_dir"
+      else
+        rm -rf -- "$pkg_dir"
+        echo "[dsh-about] 已清理残留: $pkg_dir (remove 后遗留的包实体目录)"
+        cleaned=$((cleaned + 1))
+      fi
     fi
-  fi
+  done
 done
 
 # 2) 各 profile 的 .dsh-module-fallback 回退镜像（同 profile 清单判断）
 for manifest in "$DSH_HOME_DIR"/profiles/*/package.json; do
   [ -f "$manifest" ] || continue
   prof_dir="$(dirname "$manifest")"
-  fb_dir="$prof_dir/.dsh-module-fallback/node_modules/dsh-about"
-  if [ -e "$fb_dir" ] || [ -L "$fb_dir" ]; then
-    if grep -q '"dsh-about"' "$manifest" 2>/dev/null; then
-      echo "[dsh-about] 保留（仍在声明中）: $fb_dir"
+  for name in @yannzhou/dsh-about dsh-about; do
+    fb_dir="$prof_dir/.dsh-module-fallback/node_modules/$name"
+    if [ -e "$fb_dir" ] || [ -L "$fb_dir" ]; then
+      if declared "$manifest"; then
+        echo "[dsh-about] 保留（仍在声明中）: $fb_dir"
+      else
+        rm -rf -- "$fb_dir"
+        echo "[dsh-about] 已清理残留: $fb_dir (profile 模块回退镜像)"
+        cleaned=$((cleaned + 1))
+      fi
+    fi
+  done
+done
+
+# 3) 跨 profile 共享回退镜像（任一 profile 仍声明即保留）
+for name in @yannzhou/dsh-about dsh-about; do
+  shared_mirror="$DSH_HOME_DIR/profiles/node_modules/$name"
+  if [ -e "$shared_mirror" ] || [ -L "$shared_mirror" ]; then
+    if [ "$still_declared" = 1 ]; then
+      echo "[dsh-about] 保留（仍有 profile 声明）: $shared_mirror"
     else
-      rm -rf -- "$fb_dir"
-      echo "[dsh-about] 已清理残留: $fb_dir (profile 模块回退镜像)"
+      rm -rf -- "$shared_mirror"
+      echo "[dsh-about] 已清理残留: $shared_mirror (共享模块回退镜像)"
       cleaned=$((cleaned + 1))
     fi
   fi
 done
-
-# 3) 跨 profile 共享回退镜像（任一 profile 仍声明即保留）
-shared_mirror="$DSH_HOME_DIR/profiles/node_modules/dsh-about"
-if [ -e "$shared_mirror" ] || [ -L "$shared_mirror" ]; then
-  if [ "$still_declared" = 1 ]; then
-    echo "[dsh-about] 保留（仍有 profile 声明）: $shared_mirror"
-  else
-    rm -rf -- "$shared_mirror"
-    echo "[dsh-about] 已清理残留: $shared_mirror (共享模块回退镜像)"
-    cleaned=$((cleaned + 1))
-  fi
-fi
 
 if [ "$cleaned" -gt 0 ]; then
   echo "[dsh-about] 卸载完成：已清理 $cleaned 项运行期残留"

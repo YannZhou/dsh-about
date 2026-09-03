@@ -35,15 +35,19 @@ dsh plugin --profile web add @yannzhou/dsh-about
 dsh --profile web --dump-config | grep -A1 "dsh-about"
 # 三种来源安装后形态一致，应看到（来源注释行 + patch 层）：
 #   # == @yannzhou/dsh-about      ← 依赖名（来源注释行，npm / git / link 一致）
-#   - id: dsh-about                ← patch 层 id/name，由包内声明决定
-#     name: dsh-about
+#   - id: dsh-about                ← patch 层 id（插件 cordis 标识）
+#     name: '@yannzhou/dsh-about'  ← patch 层 name（= 包名，供新版 dsh client-modules 按包名注册）
 ```
+
+> 注意：patch 层的 `name` 必须是 **scoped 包名 `@yannzhou/dsh-about`**，而非裸名 `dsh-about`。
+> 新版 dsh（0.1.2+）的客户端模块系统按「包自身 name」给插件建图，`cordis.patch.yml` 的
+> `name` 与 `lib/client.js` 的 `window.__ModuleLoader__.load({ id })` 都须与之保持一致。
 
 浏览器侧：设置 → 关于出现 DeepSeek 图标与版本行；点「检查更新」返回 npm 最新版本对比结果。
 
 > **两层名字，别混淆**：
-> - **npm 包名 / profile 依赖名**：`@yannzhou/dsh-about`。`remove` 与 `dependencies` / `bundles` 清单都用它。
-> - **cordis id / patch 层 id 与 name**：`dsh-about`（由 `lib/index.js` 的 `export const name` 与 `cordis.patch.yml` 决定）。
+> - **npm 包名 / profile 依赖名 & patch 层 `name`**：`@yannzhou/dsh-about`。`remove` 与 `dependencies` / `bundles` 清单都用它。
+> - **cordis id / 插件内部标识**：`dsh-about`（由 `lib/index.js` 的 `export const name`、HTTP 路由前缀 `/dsh-about/*`、设置分区 `id: "about"` 决定）。
 
 ## 卸载
 
@@ -75,7 +79,7 @@ dsh plugin --profile web remove @yannzhou/dsh-about
 
 ```sh
 bash scripts/uninstall.sh                                   # 克隆目录内
-# 或未克隆时：bash <(curl -fsSL https://raw.githubusercontent.com/YannZhou/dsh-about/v1.5.0/scripts/uninstall.sh)
+# 或未克隆时：bash <(curl -fsSL https://raw.githubusercontent.com/YannZhou/dsh-about/v1.6.0/scripts/uninstall.sh)
 ```
 
 唯一可选手动项：如果你曾执行过 `cp bin/dsh-watchdog ~/.local/bin/`（为独立使用

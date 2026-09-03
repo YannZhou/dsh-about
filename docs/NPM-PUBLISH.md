@@ -22,12 +22,17 @@ npm install -g @yannzhou/dsh-about          # 匿名安装应成功
 npm 安装来源：`dsh plugin --profile web add @yannzhou/dsh-about`。
 
 > **区分两层名字，别混淆**：
-> - **npm 包名 / profile 依赖名**：`@yannzhou/dsh-about`。`remove` 与
+> - **npm 包名 / profile 依赖名 / patch 层 `name`**：`@yannzhou/dsh-about`。`remove` 与
 >   `dependencies` / `bundles` 清单都用它：
 >   `dsh plugin --profile web remove @yannzhou/dsh-about`。
-> - **cordis id / patch 层 id 与 name**：`dsh-about`（由 `lib/index.js` 的
->   `export const name` 与 `cordis.patch.yml` 决定）。`--dump-config` 输出的层
->   `- id: dsh-about / name: dsh-about` 就是它；`grep dsh-about` 可匹配到两种来源的层。
+> - **cordis id / 插件内部标识**：`dsh-about`（由 `lib/index.js` 的 `export const name`、
+>   HTTP 路由前缀 `/dsh-about/*`、设置分区 `id: "about"` 决定）。`--dump-config` 输出的层
+>   `- id: dsh-about / name: '@yannzhou/dsh-about'` 就是这两层：`id` 是插件身份，`name` 是包名。
+>
+> **关键（新版 dsh）**：`cordis.patch.yml` 的 `name` 与 `lib/client.js` 的
+> `window.__ModuleLoader__.load({ id })` 都**必须等于包名 `@yannzhou/dsh-about`**。dsh 0.1.2+
+> 的客户端模块系统按「包自身 name」给插件建图；若写成裸名 `dsh-about`，客户端分区会静默不渲染
+> （宿主路由正常、无报错）。发布前务必核对这两处与 `package.json` 的 `name` 一致。
 
 ## 随包发布的文档
 

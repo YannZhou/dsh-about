@@ -8,4 +8,4 @@
 # dsh-client-modules 在组合图重建后自动发现、打包并注入 Web 前端。
 - insert:
   - id: dsh-about
-    name: dsh-about
+    name: '@yannzhou/dsh-about'
