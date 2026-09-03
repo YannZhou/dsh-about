@@ -17,17 +17,14 @@ DeepSeek Harness 设置中心 **「关于」分区**插件 —— 版本信息�
 
 前提：已安装 DeepSeek Harness（`npm i -g @deepseek-ai/dsh`，Node ≥ 18）。
 
-两种来源任选其一：
-
 ```sh
 # GitHub 安装
 dsh plugin --profile web add "git+https://github.com/YannZhou/dsh-about.git"
-
-# npm 安装（scoped 包）
-dsh plugin --profile web add @yannzhou/dsh-about
 ```
 
 装完重启 / 刷新 `dsh web`（默认 http://127.0.0.1:3080），打开 **设置 → 关于** 即可看到本分区。
+
+> 最简单的方法是扔给你的 AI，让他帮你安装。
 
 ## 卸载
 
