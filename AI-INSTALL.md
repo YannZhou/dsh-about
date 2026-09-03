@@ -48,22 +48,6 @@ cd dsh-about                    # $PLUGIN_DIR 即此目录
 ls "$PLUGIN_DIR"                 # 应包含 package.json、cordis.patch.yml、lib/、AI-INSTALL.md
 ```
 
-### 可选：从 npm 直装（无需 clone）
-
-本插件也发布在 npm（scoped 包 `@yannzhou/dsh-about`）。若目标机器可访问
-registry.npmjs.org 且人类同意走 registry，可跳过 clone，直接安装：
-
-```sh
-dsh plugin --profile web add @yannzhou/dsh-about
-```
-
-- 此方式与源码目录安装等价：pnpm 一律以包内 `package.json` 的 `name`
-  （`@yannzhou/dsh-about`）作为依赖名写入 `dependencies` 与
-  `dsh.profile.bundles`；patch 层的 `id/name` 仍取自包内 `cordis.patch.yml`，
-  为 `dsh-about`。验证与卸载命令（见第 4、6 节）三种来源完全一致。
-- 若走此方式，第 3 节及以下"从目录装"步骤可跳过；卸载命令不变，仍是
-  `dsh plugin --profile web remove @yannzhou/dsh-about`。
-
 ## 3. 安装 bundle / Install the bundle
 
 在 `$PLUGIN_DIR` 的**父目录**执行（关键：不要把 `add` 的路径指向仓库目录自身所在的
@@ -91,7 +75,7 @@ dsh --profile web --dump-config | grep -A1 "dsh-about"
 期望输出（来源注释行 + patch 层均已应用）：
 
 ```
-# == @yannzhou/dsh-about     ← 依赖名注释（npm / git / link 源码安装一致）
+# == @yannzhou/dsh-about     ← 依赖名注释（git / link 源码安装一致）
 - id: dsh-about              ← patch 层 id（插件 cordis 标识）
   name: '@yannzhou/dsh-about' ← patch 层 name（= 包名，供新版 dsh client-modules 按包名注册）
 ```
@@ -125,7 +109,7 @@ node -e "const p=require('$PLUGIN_DIR/package.json'); console.log(p.dsh.client.p
 ## 6. 卸载（供回滚参考）/ Uninstall
 
 `remove` 按 package.json `dependencies` 依赖名匹配。本包 `name` 为
-`@yannzhou/dsh-about`，无论源码 / GitHub / npm 哪种来源安装后依赖名都一致：
+`@yannzhou/dsh-about`，无论源码 / GitHub 哪种来源安装后依赖名都一致：
 
 ```sh
 dsh plugin --profile web remove @yannzhou/dsh-about

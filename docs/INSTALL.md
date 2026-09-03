@@ -10,21 +10,16 @@
 
 ## 安装
 
-支持三种来源：
-
 ```sh
-# 1) 本仓库源码（开发调试）
-git clone https://github.com/YannZhou/dsh-about.git
-dsh plugin --profile web add /path/to/dsh-about
-
-# 2) GitHub 直接安装（推荐，一条命令，随仓库更新可 re-add 升级）
+# GitHub 安装（推荐，一条命令，随仓库更新可 re-add 升级）
 dsh plugin --profile web add "git+https://github.com/YannZhou/dsh-about.git"
-
-# 3) npm 安装（scoped 包，已公开发布）
-dsh plugin --profile web add @yannzhou/dsh-about
 ```
 
-> 源码方式请在**包目录这一级**执行 `add`（指向 `dsh-about/`，不要指向其父目录）。
+> 开发调试可改用本仓库源码（在**包目录这一级**执行 `add`，指向 `dsh-about/`，不要指向其父目录）：
+> ```sh
+> git clone https://github.com/YannZhou/dsh-about.git
+> dsh plugin --profile web add /path/to/dsh-about
+> ```
 > 若 web profile 首次使用，它会用 `@deepseek-ai/dsh-base` 自动初始化，属正常现象。
 
 安装后重启 / 刷新 `dsh web`（默认 http://127.0.0.1:3080），打开 **设置 → 关于** 即可看到本分区。
@@ -33,8 +28,8 @@ dsh plugin --profile web add @yannzhou/dsh-about
 
 ```sh
 dsh --profile web --dump-config | grep -A1 "dsh-about"
-# 三种来源安装后形态一致，应看到（来源注释行 + patch 层）：
-#   # == @yannzhou/dsh-about      ← 依赖名（来源注释行，npm / git / link 一致）
+# 安装后形态一致，应看到（来源注释行 + patch 层）：
+#   # == @yannzhou/dsh-about      ← 依赖名（来源注释行，git / link 一致）
 #   - id: dsh-about                ← patch 层 id（插件 cordis 标识）
 #     name: '@yannzhou/dsh-about'  ← patch 层 name（= 包名，供新版 dsh client-modules 按包名注册）
 ```
@@ -57,7 +52,7 @@ dsh plugin --profile web remove @yannzhou/dsh-about
 
 `remove` 会原样转发给 pnpm，按 package.json `dependencies` 里的依赖名删除
 （reconcile 同时把同名 bundle 从 `dsh.profile.bundles` 摘掉），因此卸载命令须与依赖名一致。
-**无论源码 / GitHub / npm 哪种来源，安装后依赖名都是 `@yannzhou/dsh-about`**。
+**无论 GitHub / 源码哪种来源，安装后依赖名都是 `@yannzhou/dsh-about`**。
 
 > 兼容旧实例：若某 profile 是在本包改名（裸名 `dsh-about` → scoped
 > `@yannzhou/dsh-about`）**之前**装的，那一份依赖名是裸名 `dsh-about`，
@@ -74,8 +69,9 @@ dsh plugin --profile web remove @yannzhou/dsh-about
 
 运行期数据（`$DSH_HOME/dsh-about` 插件数据目录——版本记录缓存与更新源选择、`$DSH_HOME/dsh-watchdog.log`、
 `$DSH_HOME/dsh-about-restart.log`、锁文件）由卸载钩子 `scripts/postuninstall.js`
-自动删除。npm（registry）安装会正常触发该钩子，卸载即自动清理；仅 pnpm 对
-`link:`/本地路径/`file:` tarball 安装的包**不执行**该钩子，此时请补跑兜底脚本：
+自动删除。registry（npm）安装会正常触发该钩子，卸载即自动清理；仅 pnpm 对
+`link:`/本地路径/`file:` tarball 安装的包**不执行**该钩子（GitHub `git+` 安装视 pnpm
+解析形态可能也不触发），此时请补跑兜底脚本：
 
 ```sh
 bash scripts/uninstall.sh                                   # 克隆目录内
