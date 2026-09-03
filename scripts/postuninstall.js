@@ -2,7 +2,7 @@
 // 由 `dsh plugin --profile <name> remove dsh-about` 触发（pnpm remove 执行生命周期脚本）。
 // 职责：删除插件运行期在宿主之外产生的全部痕迹，保证「拔除即干净、零残留」。
 // 本脚本只清理 dsh-about / dsh-watchdog 明确写入的路径，绝不越界删除用户数据。
-import { rmSync, existsSync } from "node:fs";
+import { rmSync, existsSync, readdirSync, lstatSync, readFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
@@ -25,6 +25,87 @@ for (const target of targets) {
 		}
 	} catch (error) {
 		process.stdout.write(`[dsh-about] 清理 ${target} 失败(已忽略): ${String(error.message)}\n`);
+	}
+}
+
+// ── 残留的包实体目录：pnpm remove 之后插件实体可能残留在三类位置 ──
+//   1) <profile>/node_modules/dsh-about
+//   2) <profile>/.dsh-module-fallback/node_modules/dsh-about（该 profile 的模块回退镜像）
+//   3) $DSH_HOME/profiles/node_modules/dsh-about（跨 profile 共享的模块回退镜像；
+//      只随 dsh-install 依赖闭包自动维护，dsh-about 不在闭包内故从不会被自动清理）
+// 清理守则（绝不越界删用户数据）：仅当「没有任何」profile 的 package.json 仍声明
+// dsh-about（dependencies/devDependencies 与 dsh.profile.bundles 均无）时才删除。
+// 本钩子由 `dsh plugin remove`（pnpm remove）触发，此时 bundles 已对账，判断才准确。
+function manifestDeclares(manifest) {
+	try {
+		const text = readFileSync(manifest, "utf8");
+		// 命中任何形式的 "dsh-about"（dependencies/devDependencies 键，或 bundles 数组项）
+		return /"dsh-about"/.test(text);
+	} catch {
+		return true; // 清单读不到时保守保留，绝不误删
+	}
+}
+
+const profilesRoot = path.join(home, "profiles");
+let profiles;
+try {
+	profiles = readdirSync(profilesRoot, { withFileTypes: true })
+		.filter((entry) => entry.isDirectory())
+		.map((entry) => path.join(profilesRoot, entry.name))
+		.filter((dir) => existsSync(path.join(dir, "package.json")));
+} catch {
+	profiles = [];
+}
+
+let stillDeclared = profiles.some((dir) => manifestDeclares(path.join(dir, "package.json")));
+
+function removeIfUnused(entityDir, describe) {
+	let isLink = false;
+	let exists;
+	try {
+		exists = existsSync(entityDir);
+		if (exists) isLink = lstatSync(entityDir).isSymbolicLink();
+	} catch {
+		return; // 不存在或读不到 → 无需清理，静默
+	}
+	if (!exists && !isLink) return;
+	try {
+		rmSync(entityDir, { recursive: true, force: true });
+		cleaned += 1;
+		process.stdout.write(`[dsh-about] 已清理残留: ${entityDir} (${describe})\n`);
+	} catch (error) {
+		process.stdout.write(`[dsh-about] 清理 ${entityDir} 失败(已忽略): ${String(error.message)}\n`);
+	}
+}
+
+// 1) 各 profile 自身 node_modules
+for (const dir of profiles) {
+	const manifest = path.join(dir, "package.json");
+	const pkgDir = path.join(dir, "node_modules", "dsh-about");
+	if (!manifestDeclares(manifest)) removeIfUnused(pkgDir, "remove 后遗留的包实体目录");
+}
+
+// 2) 各 profile 的 .dsh-module-fallback 回退镜像
+for (const dir of profiles) {
+	const manifest = path.join(dir, "package.json");
+	const fbDir = path.join(dir, ".dsh-module-fallback", "node_modules", "dsh-about");
+	if (!manifestDeclares(manifest)) removeIfUnused(fbDir, "profile 模块回退镜像");
+}
+
+// 3) 跨 profile 共享回退镜像：任一 profile 仍声明即保留
+const sharedMirror = path.join(profilesRoot, "node_modules", "dsh-about");
+const sharedExists = existsSync(sharedMirror) || lstatSyncSafe(sharedMirror);
+if (stillDeclared && sharedExists) {
+	process.stdout.write(`[dsh-about] 保留（仍有 profile 声明）: ${sharedMirror}\n`);
+} else {
+	removeIfUnused(sharedMirror, "共享模块回退镜像");
+}
+
+function lstatSyncSafe(p) {
+	try {
+		return lstatSync(p).isSymbolicLink();
+	} catch {
+		return false;
 	}
 }
 process.stdout.write(

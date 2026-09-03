@@ -18,10 +18,13 @@ DeepSeek Harness 设置中心「关于」分区插件 —— **检查更新 + �
   - **延迟检测**：下拉列表中每个源右侧显示「未检测」，**点击即测该源**连通性并显示实测毫秒延迟；只标记被点击的那个源为「检测中…」，其余源不受影响；连不上标红「不可达」，可随时点重新检测。检测在宿主侧发起（走 dsh 所在机器的网络，与安装路径一致）。
   - **开合动画**：下拉展开时淡入并轻微上滑展开，收起时平滑折叠（响应系统「减弱动态效果」偏好时自动关闭动画）。
 - **版本选择**：列出 npm 上比当前新的版本（最多 10 个），**并合并 GitHub 已发布但 npm 未同步的版本**（如 `0.1.2-alpha.1`，标注「npm 未发布」，无法一键安装），弹窗选择安装。
-- **一键更新**：`npm install -g @deepseek-ai/dsh@<目标版本>`（走当前选中的 npm 源），成功后**自动重启 dsh web**（委托外部一次性看护 `bin/dsh-watchdog once`：包内内置、随装随卸；等宿主退出 → 数 3 秒 → 优先 systemd 拉起 `dsh-web`、退回原命令裸拉起（带 `--no-open`），端口就绪后**自动退出、零常驻**；决策日志 `$DSH_HOME/dsh-watchdog.log`）。
-  - 看护进程经 `systemd-run` 放入独立 transient 单元（独立 cgroup）——实测宿主退出时
+- **一键更新**：`npm install -g @deepseek-ai/dsh@<目标版本>`（走当前选中的 npm 源），成功后**自动重启 dsh web**（委托外部一次性看护 `dsh-watchdog once`：包内内置、随装随卸，**Windows / macOS / Linux 三平台可用**；等宿主退出 → 数 3 秒 → 优先 systemd 拉起 `dsh-web`、退回原命令裸拉起（带 `--no-open`），端口就绪后**自动退出、零常驻**；决策日志 `$DSH_HOME/dsh-watchdog.log`）。
+  - **跨平台看护**：`bin/dsh-watchdog.mjs`（纯 Node）是三平台首选——node 是 dsh 运行时必有依赖，**零新增依赖**，Windows / macOS / Linux 同一套；`bin/dsh-watchdog`（bash）保留给 Linux「常驻主循环 + systemd 用户服务」高级场景，并在极少数无 node 环境兜底。
+  - **Linux + systemd-run**：看护进程放进独立 transient 单元（独立 cgroup）——实测宿主退出时
     systemd 会清空 dsh-web 服务 cgroup 内的一切子进程，普通 detached 派生必死；
     transient 单元不受影响，更新后白屏无人拉起的根因即此。
+  - **macOS / Windows**：无 systemd，宿主 detached 派生 Node 看护即可；Windows 下
+    npm 安装走 `npm.cmd`（shell 解析）、进程树终止走 `taskkill /T /F`，均已适配。
 - **版本更新记录**：官方 GitHub Releases 最新 10 条，中文正文渲染，**每条描述默认收起，点击头部箭头展开/收起**；每日首次打开自动拉取一次并**保存到本地电脑**（`$DSH_HOME/dsh-about/releases-cache.json`），失败不会反复重试；点「刷新」可手动强刷。
 
 ## 安全性设计要点
@@ -56,7 +59,8 @@ dsh --profile web --dump-config | grep dsh-about   # 应看到 - id: dsh-about �
 ```
 
 然后重启 / 刷新 `dsh web`（默认 http://127.0.0.1:3080），打开 **设置 → 关于** 即可看到本分区。
-插件自带的 `bin/dsh-watchdog` 随包安装、随包卸载，无需任何手工放置。
+插件自带的看护（`bin/dsh-watchdog.mjs` 跨平台 Node 版 + `bin/dsh-watchdog` Linux bash 版）
+随包安装、随包卸载，无需任何手工放置。
 
 ## 验证
 
@@ -74,7 +78,7 @@ dsh plugin --profile web remove dsh-about
   `cordis.patch.yml`（dsh.bundle.patch 层）随之消失；重启后「关于」分区、
   `/dsh-about/*` 路由、客户端 bundle 全部消失。无需手动改任何配置文件。
 - **包文件**：profile node_modules 内的 `dsh-about` 实体（含内置看护
-  `bin/dsh-watchdog`、卸载脚本）随包删除。
+  `bin/dsh-watchdog.mjs` / `bin/dsh-watchdog`、卸载脚本）随包删除。
 - **进程**：更新链路的一次性看护进程端口就绪后自动退出，不驻留。
 
 运行期数据（`$DSH_HOME/dsh-about` 插件数据目录——版本记录缓存与更新源选择、`$DSH_HOME/dsh-watchdog.log`、
@@ -84,7 +88,7 @@ dsh plugin --profile web remove dsh-about
 ```sh
 # 2) 运行期残留清理（仅当 1 未自动清理时）
 bash scripts/uninstall.sh                                   # 克隆目录内
-# 或未克隆时：bash <(curl -fsSL https://raw.githubusercontent.com/YannZhou/dsh-about/v1.2.0/scripts/uninstall.sh)
+# 或未克隆时：bash <(curl -fsSL https://raw.githubusercontent.com/YannZhou/dsh-about/v1.5.0/scripts/uninstall.sh)
 ```
 
 唯一可选手动项：如果你曾执行过 `cp bin/dsh-watchdog ~/.local/bin/`（为独立使用
