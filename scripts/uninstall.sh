@@ -23,7 +23,7 @@ clean() { # $1=路径 $2=描述
   fi
 }
 
-clean "$DSH_HOME_DIR/dsh-about" "版本记录磁盘缓存目录 releases-cache.json"
+clean "$DSH_HOME_DIR/dsh-about" "插件数据目录(版本记录缓存 releases-cache.json / 更新源 source.json)"
 clean "$DSH_HOME_DIR/dsh-about-restart.log" "旧版内嵌看护遗留日志"
 clean "$DSH_HOME_DIR/dsh-watchdog.log" "once 一次性看护决策日志"
 clean "$DSH_HOME_DIR/.dsh-watchdog.lock" "常驻看护单实例锁"

@@ -8,7 +8,7 @@ import path from "node:path";
 
 const home = process.env.DSH_HOME || path.join(os.homedir(), ".dsh");
 const targets = [
-	path.join(home, "dsh-about"), // 版本记录磁盘缓存目录（releases-cache.json）
+	path.join(home, "dsh-about"), // 插件数据目录（版本记录缓存 releases-cache.json / 更新源 source.json）
 	path.join(home, "dsh-about-restart.log"), // 旧版内嵌看护遗留日志
 	path.join(home, "dsh-watchdog.log"), // once 一次性看护决策日志
 	path.join(home, ".dsh-watchdog.lock"), // 常驻看护单实例锁（如有）
