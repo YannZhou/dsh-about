@@ -36,6 +36,18 @@
     "update"
   ],
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/YannZhou/dsh-about.git"
+  },
+  "homepage": "https://github.com/YannZhou/dsh-about#readme",
+  "bugs": {
+    "url": "https://github.com/YannZhou/dsh-about/issues"
+  },
+  "author": "YannZhou <3609286195@qq.com>",
+  "engines": {
+    "node": ">=18"
+  },
   "dsh": {
     "bundle": {
       "patch": "./cordis.patch.yml"
