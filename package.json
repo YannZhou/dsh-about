@@ -18,8 +18,12 @@
     "LICENSE",
     "assets",
     "docs",
-    "scripts"
+    "scripts",
+    "screenshots.json"
   ],
+  "publishConfig": {
+    "access": "public"
+  },
   "keywords": [
     "dsh",
     "deepseek-harness",
