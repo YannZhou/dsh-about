@@ -1,40 +1,40 @@
 # 发布到 npm（维护者向）
 
-包已发布为 **scoped 包 `@yannzhou/dsh-about`**（npm Granular 令牌体系下对
-无前缀裸包名无法授予写权限，故采用与账号作用域一致的 scoped 名）。包结构已符合
-从 npm 直接安装的官方形态（main/exports/dsh./files/bin/scripts 齐备）。
+包以 **scoped 名 `@yannzhou/dsh-about`** 发布（npm 对无前缀裸包名无法按账号作用域授权写权限，故采用 scoped 名）。包结构已符合从 npm 直接安装的官方形态：`main` / `exports` / `dsh` 清单 / `files` 白名单 / `scripts` 齐全（无 `bin` 字段——内置看护脚本由插件内部引用，不作为 CLI 对外暴露）。
 
 ## 发布
 
 ```sh
-# 1) 先登录/准备有 @yannzhou 作用域写权限的令牌（whoami 应为 yannzhou）
-# 2) scoped 包默认走 private，必须显式 --access public 才能公开分发
-npm publish --access public
+# 1) 确认已登录（whoami 应为 yannzhou）
+npm whoami
+
+# 2) 发布（access 已写死在 package.json 的 publishConfig，无需带参）
+npm publish
 ```
+
+## 发布后（必做）
+
+1. **打 tag 并推 GitHub**（保持 npm 版本与仓库 tag 对齐）：
+   ```sh
+   git tag vX.Y.Z && git push origin vX.Y.Z
+   ```
+2. **创建 GitHub Release**：插件「版本更新记录」拉的就是 GitHub Releases，只发 npm 不建 Release，用户端看不到新版本。用 `gh release create` 或网页创建，写清这版改了什么。
 
 ## 验证（匿名可查可装即成功）
 
 ```sh
 npm view @yannzhou/dsh-about version        # 应输出版本号
-npm install -g @yannzhou/dsh-about          # 匿名安装应成功
+dsh plugin --profile web add @yannzhou/dsh-about   # 匿名安装应成功
 ```
 
-npm 安装来源：`dsh plugin --profile web add @yannzhou/dsh-about`。
+> 不要用 `npm install -g` 验证：那会装到全局 npm 目录，与 dsh 的 profile 安装无关，且可能触发权限问题。
 
-> **区分两层名字，别混淆**：
-> - **npm 包名 / profile 依赖名 / patch 层 `name`**：`@yannzhou/dsh-about`。`remove` 与
->   `dependencies` / `bundles` 清单都用它：
->   `dsh plugin --profile web remove @yannzhou/dsh-about`。
-> - **cordis id / 插件内部标识**：`dsh-about`（由 `lib/index.js` 的 `export const name`、
->   HTTP 路由前缀 `/dsh-about/*`、设置分区 `id: "about"` 决定）。`--dump-config` 输出的层
->   `- id: dsh-about / name: '@yannzhou/dsh-about'` 就是这两层：`id` 是插件身份，`name` 是包名。
->
-> **关键（新版 dsh）**：`cordis.patch.yml` 的 `name` 与 `lib/client.js` 的
-> `window.__ModuleLoader__.load({ id })` 都**必须等于包名 `@yannzhou/dsh-about`**。dsh 0.1.2+
-> 的客户端模块系统按「包自身 name」给插件建图；若写成裸名 `dsh-about`，客户端分区会静默不渲染
-> （宿主路由正常、无报错）。发布前务必核对这两处与 `package.json` 的 `name` 一致。
+## 已知注意点
+
+- **发布后 24 小时内，pnpm 默认安装会回退到旧版**：pnpm 的 minimumReleaseAge 门禁认为新版本太年轻，静默保留上一版本且不报错。要立刻验证最新版，请显式指定版本：`dsh plugin add @yannzhou/dsh-about@X.Y.Z`。
+- **scoped 包默认 private**：`publishConfig.access=public` 已写入 package.json，直接 `npm publish` 即可公开；若在别处手动发布，务必带 `--access public`。
+- **两层名字别混淆**：对外包名 `@yannzhou/dsh-about`（npm / 依赖清单 / patch 层 name / 客户端注册键）与对内插件 id `dsh-about`（cordis id / 路由 / 分区 id）各司其职。发布前核对 `cordis.patch.yml` 的 name 与 `lib/client.js` 的 `load({ id })` 均等于包名——dsh 0.1.2+ 按包名建客户端图，写裸名会导致「关于」分区静默不渲染。
 
 ## 随包发布的文档
 
-`package.json` 的 `files` 字段已包含 `README.md`、`AI-INSTALL.md`、`LICENSE`、
-`assets/`、`docs/` 随 npm 包分发；`docs/` 下的安装手册与架构文档发布后同样可查。
+`package.json` 的 `files` 白名单包含 `README.md`、`AI-INSTALL.md`、`LICENSE`、`assets/`、`docs/`、`screenshots.json`（市场详情截图声明），随 npm 包一并分发。
