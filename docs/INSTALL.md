@@ -11,9 +11,16 @@
 ## 安装
 
 ```sh
-# GitHub 安装（推荐，一条命令，随仓库更新可 re-add 升级）
+# 方式一：GitHub 安装（推荐，一条命令，随仓库更新可 re-add 升级）
 dsh plugin --profile web add "git+https://github.com/YannZhou/dsh-about.git"
+
+# 方式二：npm 安装（包已发布到 npm，scoped 包名 @yannzhou/dsh-about）
+dsh plugin --profile web add @yannzhou/dsh-about
 ```
+
+> 两种方式等价：安装后依赖名都是 `@yannzhou/dsh-about`，patch 层与客户端注册一致。
+> 注意：npm 包发布后 24 小时内，pnpm 的 minimumReleaseAge 门禁可能让默认安装回退到旧版本；
+> 若需要立即装最新版，可显式指定版本，如 `dsh plugin --profile web add @yannzhou/dsh-about@1.6.1`。
 
 > 开发调试可改用本仓库源码（在**包目录这一级**执行 `add`，指向 `dsh-about/`，不要指向其父目录）：
 > ```sh
