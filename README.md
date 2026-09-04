@@ -17,7 +17,9 @@ DeepSeek Harness 设置中心「关于」分区插件：查看版本、检查更
 
 前提：已安装 DeepSeek Harness（`npm i -g @deepseek-ai/dsh`，Node ≥ 18）。
 
-二选一：
+> [!IMPORTANT]
+> **最省事的装法：把仓库地址直接扔给你的 AI，让它帮你装。** 你只需要说一句"帮我装这个插件"。
+> 想自己动手的话，下面二选一：
 
 ```sh
 # 方式一：GitHub 安装
@@ -28,8 +30,6 @@ dsh plugin --profile web add @yannzhou/dsh-about
 ```
 
 装完刷新 `dsh web`（默认 http://127.0.0.1:3080），打开 **设置 → 关于** 就能看到。
-
-> 嫌麻烦的话，直接把仓库地址扔给你的 AI，让它帮你装。
 
 ## 卸载
 

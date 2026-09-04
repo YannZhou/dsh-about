@@ -9,11 +9,15 @@
 
 ## 安装
 
+> [!IMPORTANT]
+> **最推荐的装法：把仓库地址直接扔给你的 AI，让它帮你装。** 你只需要说一句"帮我装这个插件"，
+> AI 会照着 `AI-INSTALL.md` 完成全部步骤。想自己动手的话，下面二选一：
+
 ```sh
-# 方式一：GitHub 安装（推荐）
+# 方式一：GitHub 安装（推荐，一条命令，随仓库更新可 re-add 升级）
 dsh plugin --profile web add "git+https://github.com/YannZhou/dsh-about.git"
 
-# 方式二：npm 安装
+# 方式二：npm 安装（包已发布到 npm，scoped 包名 @yannzhou/dsh-about）
 dsh plugin --profile web add @yannzhou/dsh-about
 ```
 
