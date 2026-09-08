@@ -26,6 +26,9 @@ DeepSeek Harness 设置中心「关于」分区插件：查看版本、检查更
 > npm install -g --dangerously-allow-all-scripts @deepseek-ai/dsh@latest
 > ```
 > 本插件「一键更新」已内置同样处理并带自动校验重装，直接用即可，无需手动。
+> 另外插件每次启动会自动扫描 dsh 实际依赖树，把其中的原生模块以白名单形式
+> 追加进你的 `~/.npmrc`（只追加、不动其它配置，写前自动备份）——手动执行
+> `npm install -g @deepseek-ai/dsh` 升级同样安全。
 > 若 dsh 已经打不开，用 `--force` 重装当前版本即可修复：
 > ```sh
 > npm install -g --dangerously-allow-all-scripts --force @deepseek-ai/dsh@latest
