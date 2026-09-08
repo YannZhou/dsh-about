@@ -7,6 +7,23 @@
 - 已装 DeepSeek Harness：`npm i -g @deepseek-ai/dsh`（Node ≥ 18）。
 - dsh CLI 支持 `dsh plugin` 子命令（0.x 均支持）。
 
+> [!IMPORTANT]
+> **npm ≥ 12 用户**：npm 12 默认拦截依赖的安装脚本，dsh 的原生依赖
+> （fs-ext / koffi / node-pty / protobufjs / @google/genai / @deepseek-ai/dsh-subprocess-local）
+> 需要编译，被拦会缺产物导致 dsh 装完打不开（典型报错
+> `Cannot find module '.../build/Release/fs_ext.node'`）。请用带放行参数的命令：
+> ```sh
+> npm install -g --dangerously-allow-all-scripts @deepseek-ai/dsh
+> ```
+> 升级同理（`@deepseek-ai/dsh@latest`）。若 dsh 已经打不开（缺 `.node` 产物），
+> 加 `--force` 重装当前版本即可修复，无需降级：
+> ```sh
+> npm install -g --dangerously-allow-all-scripts --force @deepseek-ai/dsh
+> ```
+> 本插件「一键更新」已内置：npm ≥ 12 自动附加放行参数，安装后自动校验
+> （install-scripts 警告 + dsh --version 双信号），不健康时带 `--force` 自动重装
+> 一次自愈，仍失败才报错。因此用插件更新即可，无需手动处理以上细节。
+
 ## 安装
 
 > [!IMPORTANT]
