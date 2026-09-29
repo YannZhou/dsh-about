@@ -1,0 +1,113 @@
+name: 发布到 npm
+
+# 打 tag（v*）即自动完成「npm 发布 + 建 GitHub Release」两步，
+# 取代 RELEASE.md 里原先的两条手工命令，避免「推了 GitHub 忘了 npm」。
+#
+# 需要仓库 Secret：NPM_TOKEN
+#   npm 网页 → Access Tokens → Generate New Token → Granular Access Token
+#   权限：Read and write；勾选 Bypass 2FA；建议限定包 @yannzhou/dsh-about
+#
+# 手工补发：Actions → 发布到 npm → Run workflow，填要发布的 tag（如 v1.7.0）。
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "要发布的 tag（如 v1.7.0）"
+        required: true
+        type: string
+
+permissions:
+  contents: write # 建 GitHub Release 需要
+
+concurrency:
+  group: publish-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - name: 取出被发布的提交
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag || github.ref }}
+
+      - name: 准备 Node 与 npm 源
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          registry-url: "https://registry.npmjs.org"
+
+      # RELEASE.md 的两条硬规矩在这里挡住：标签必须等于 package.json 的 version；
+      # 每个版本必须有 docs/versions/v<版本>.md。不合规就红叉，绝不静默发错版本。
+      - name: 校验 tag / 版本 / 版本文档
+        id: ver
+        run: |
+          set -euo pipefail
+          TAG="${{ inputs.tag || github.ref_name }}"
+          VERSION="${TAG#v}"
+          PKG="$(node -p "require('./package.json').version")"
+          echo "tag=$TAG  package.json=$PKG"
+          if [ "$VERSION" != "$PKG" ]; then
+            echo "::error::tag $TAG 与 package.json 的 $PKG 不一致（标签必须与 version 完全一致）"
+            exit 1
+          fi
+          if [ ! -f "docs/versions/v$VERSION.md" ]; then
+            echo "::error::缺少 docs/versions/v$VERSION.md（每次发布必须写版本文档）"
+            exit 1
+          fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: 语法自检
+        run: node --check lib/index.js && node --check lib/client.js && node --check lib/semver.js
+
+      # 幂等：版本已在 npm 上（重复推 tag / 手工补跑）就跳过发布，不报错。
+      - name: 检查该版本是否已发布
+        id: check
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          set -euo pipefail
+          if npm view "@yannzhou/dsh-about@${{ steps.ver.outputs.version }}" version >/dev/null 2>&1; then
+            echo "already=true" >> "$GITHUB_OUTPUT"
+            echo "::notice::npm 上已有 ${{ steps.ver.outputs.version }}，跳过发布"
+          else
+            echo "already=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: 发布到 npm
+        if: steps.check.outputs.already == 'false'
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: npm publish --registry=https://registry.npmjs.org
+
+      # 回读确认：以 npm 上真实存在的版本为准，不信 exit code。
+      - name: 回读校验
+        if: steps.check.outputs.already == 'false'
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          set -euo pipefail
+          sleep 5
+          GOT="$(npm view "@yannzhou/dsh-about@${{ steps.ver.outputs.version }}" version)"
+          echo "npm 上查到的版本 = $GOT"
+          test "$GOT" = "${{ steps.ver.outputs.version }}"
+
+      # Release 正文格式照 RELEASE.md：标题 = 纯版本号，正文 = 一行链接。
+      - name: 建 GitHub Release（已存在则跳过）
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          TAG="${{ inputs.tag || github.ref_name }}"
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "::notice::Release $TAG 已存在，跳过"
+            exit 0
+          fi
+          gh release create "$TAG" \
+            --title "$TAG" \
+            --notes "版本说明见 [docs/versions/$TAG.md](https://github.com/YannZhou/dsh-about/blob/main/docs/versions/$TAG.md)"

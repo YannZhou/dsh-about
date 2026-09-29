@@ -4,6 +4,24 @@
 
 ## 发布
 
+**正常路径：推 tag，CI 自动发。** 合入 `main` 后推标签即可，不需要本地跑 `npm publish`：
+
+```sh
+git push origin main
+git tag vX.Y.Z && git push origin vX.Y.Z
+```
+
+`.github/workflows/publish-npm.yml` 会在 tag 推上去后自动：校验 `tag == package.json.version` +
+`docs/versions/vX.Y.Z.md` 存在 + 三个 JS `node --check` 通过 → 该版本没发过才 `npm publish` →
+回读 npm 确认 → 建 GitHub Release（标题 = 纯版本号，正文 = 一行版本文档链接）。任一校验不过就红叉，
+不会发出错版本；重复推 tag 或手工补跑（Actions → 发布到 npm → Run workflow）都会识别「已发布」并跳过。
+
+**一次性配置**：仓库 Settings → Secrets and variables → Actions → 新建 secret `NPM_TOKEN`，
+值是 npm 网页生成的 Granular Access Token（Read and write、勾 Bypass 2FA、限定 `@yannzhou/dsh-about`）。
+本地 `gh secret set NPM_TOKEN` 交互式粘贴也行。没配这个 secret，CI 会在发布步骤失败。
+
+**手工兜底**（CI 挂了 / 临时没配 secret）：
+
 ```sh
 # 1) 确认已登录（whoami 应为 yannzhou）
 npm whoami
@@ -12,13 +30,12 @@ npm whoami
 npm publish
 ```
 
-## 发布后（必做）
+## 发布后
 
-1. **打 tag 并推 GitHub**（保持 npm 版本与仓库 tag 对齐）：
-   ```sh
-   git tag vX.Y.Z && git push origin vX.Y.Z
-   ```
-2. **创建 GitHub Release**：插件「版本更新记录」拉的就是 GitHub Releases，只发 npm 不建 Release，用户端看不到新版本。用 `gh release create` 或网页创建，写清这版改了什么。
+CI 已自动建好 GitHub Release（插件「版本更新记录」拉的就是 GitHub Releases，只发 npm 不建 Release
+用户端看不到新版本）。手工发布时记得自己补上：`gh release create vX.Y.Z --title vX.Y.Z --notes "版本说明见 [docs/versions/vX.Y.Z.md](https://github.com/YannZhou/dsh-about/blob/main/docs/versions/vX.Y.Z.md)"`。
+
+无论哪条路径，都回读一次确认：`npm view @yannzhou/dsh-about version`、`gh release view vX.Y.Z`。
 
 ## 验证（匿名可查可装即成功）
 

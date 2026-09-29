@@ -7,6 +7,8 @@
 
 - **推送前必须交用户验证**：改动做完先把成果给用户验证，**用户明确说「推送」**，才允许
   `git push` / `git tag` / `gh release create` / `npm publish`。
+  ⚠️ **推 `v*` 标签会自动触发 `.github/workflows/publish-npm.yml`**：它替我们做 npm publish
+  并建 GitHub Release。所以「推 tag」这一个动作就等于同时授权了 npm 发布——别以为只推了 GitHub。
 - **Release 正文只有一行链接**：标题已经是版本号，正文不再重复版本号，也不放变更长文。
   详细说明一律写进 `docs/versions/<版本>.md`。
 - **每次发布必须写版本文档**，并在 `docs/versions/README.md` 的索引表里加一行。
@@ -21,6 +23,22 @@
 1. `package.json` 的 `version`（npm 包版本、dsh 插件版本、`/dsh-about/plugin` 读的都是它）；
 2. 新增 `docs/versions/v<版本>.md`（版本信息 + 变更说明），并在 `docs/versions/README.md` 索引表加一行；
 3. Git 标签 `v<版本>` 与 GitHub Release（正文只写一行链接引导）。
+
+## 发布动作：推 tag 即自动发（CI 负责 npm + Release）
+
+`git push origin main` 之后推标签 `v<版本>`，`.github/workflows/publish-npm.yml` 会自动：
+
+1. 校验 `tag == package.json.version`、`docs/versions/v<版本>.md` 存在、三个 JS `node --check` 通过（任一不过就红叉，不会发错版本）；
+2. 该版本已在 npm 上则跳过发布（重复推 tag / 手工补跑都不报错）；
+3. `npm publish --registry=https://registry.npmjs.org`，然后回读 npm 确认版本真的在；
+4. 建 GitHub Release：标题 = 纯版本号，正文 = 一行版本文档链接。
+
+因此**不需要再手工跑 `npm publish` / `gh release create`**。补发或重跑：Actions → 「发布到 npm」→ Run workflow，填 tag。
+
+**一次性配置**（换 token 时重做）：仓库 Settings → Secrets and variables → Actions → New repository secret，
+名字 `NPM_TOKEN`，值是 npm 网页生成的 **Granular Access Token**（Read and write、勾 Bypass 2FA、限定
+`@yannzhou/dsh-about`）。也可以在本地跑 `gh secret set NPM_TOKEN`（交互式粘贴，不进聊天记录）。
+没配这个 secret 时 CI 会在发布步骤失败，本地手工 `npm publish` 仍可作为兜底。
 
 ## Release 文案（严格照抄这个格式）
 
@@ -48,11 +66,12 @@
     plugin --profile web2 add @yannzhou/dsh-about@<版本>
   ```
 
-- `npm publish --registry=https://registry.npmjs.org`（需 npm 网页生成的 granular token 并勾选
-  bypass 2FA；`npm whoami` 先确认登录态）。
+- 推 tag 前确认 CI 的前置条件都满足（CI 会再校验一遍）：`package.json.version` == 标签、`docs/versions/v<版本>.md` 已写。
+- 需要手工兜底时才本地发（CI 挂了 / 没配 secret）：`npm publish --registry=https://registry.npmjs.org`
+  （需 npm 网页生成的 granular token 并勾选 bypass 2FA；`npm whoami` 先确认登录态）。
 - 发布后回读：`npm view @yannzhou/dsh-about version` / `npm view <pkg> time`、`npm pack` 核对 tarball
   文件清单（scoped 包必须 `publishConfig.access=public`）、`gh release view v<版本>` 正文与资产、
-  `git ls-remote origin refs/heads/main refs/tags/v<版本>` 与本地一致。
+  `git ls-remote origin refs/heads/main refs/tags/v<版本>` 与本地一致；用 CI 发布时看 Actions 那个 run 是否绿。
 
 ## 已知约束
 
