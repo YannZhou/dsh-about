@@ -80,25 +80,36 @@ jobs:
           fi
 
       - name: 发布到 npm
+        id: publish
         if: steps.check.outputs.already == 'false'
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: npm publish --registry=https://registry.npmjs.org
 
       # 回读确认：以 npm 上真实存在的版本为准，不信 exit code。
-      - name: 回读校验
+      # 注意 npm 发布后会「being processed」几分钟才在 registry 可见，单次查询必假红，必须轮询。
+      - name: 回读校验（轮询等上架）
         if: steps.check.outputs.already == 'false'
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: |
           set -euo pipefail
-          sleep 5
-          GOT="$(npm view "@yannzhou/dsh-about@${{ steps.ver.outputs.version }}" version)"
-          echo "npm 上查到的版本 = $GOT"
-          test "$GOT" = "${{ steps.ver.outputs.version }}"
+          V="${{ steps.ver.outputs.version }}"
+          for i in $(seq 1 20); do
+            if GOT="$(npm view "@yannzhou/dsh-about@$V" version 2>/dev/null)"; then
+              echo "第 $i 次查询：npm 上已可见 $GOT"
+              exit 0
+            fi
+            echo "第 $i 次查询：尚未上架（npm 发布后需数分钟才可见），30 秒后重试"
+            sleep 30
+          done
+          echo "::error::发布后约 10 分钟 npm 上仍查不到 $V，请人工核对 npm 账号是否有未完成的发布"
+          exit 1
 
       # Release 正文格式照 RELEASE.md：标题 = 纯版本号，正文 = 一行链接。
+      # 用 always()：回读那步即使超时，只要包已经推上去了，Release 也该建出来。
       - name: 建 GitHub Release（已存在则跳过）
+        if: always() && (steps.check.outputs.already == 'true' || steps.publish.outcome == 'success')
         env:
           GH_TOKEN: ${{ github.token }}
         run: |

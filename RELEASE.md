@@ -75,6 +75,7 @@
 
 ## 已知约束
 
+- **npm 发布后 registry 可见有数分钟延迟**：`npm publish` 输出 `Your package is being processed`。所以 CI 里「发布到 npm」成功后紧接着查可能 404，workflow 会轮询最多 10 分钟；这一步超时/红叉**不代表没发成功**，去 npm 包页面核对真实状态，别急着重发（重发同版本必被 npm 拒绝）。
 - **发布后 24 小时内 pnpm 默认安装会回退到旧版**（`minimumReleaseAge` 门禁，静默不报错）：
   验证/自更新请显式指定版本号 `dsh plugin add @yannzhou/dsh-about@<版本>`。
 - **两层名字别混淆**：对外包名 `@yannzhou/dsh-about`（npm / 依赖清单 / patch 层 name / 客户端注册键）
