@@ -39,7 +39,7 @@ jobs:
       - name: 准备 Node 与 npm 源
         uses: actions/setup-node@v5
         with:
-          node-version: "20"
+          node-version: "24"
           registry-url: "https://registry.npmjs.org"
 
       # RELEASE.md 的两条硬规矩在这里挡住：标签必须等于 package.json 的 version；
