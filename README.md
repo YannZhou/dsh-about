@@ -64,6 +64,8 @@ dsh plugin --profile web remove @yannzhou/dsh-about
 | [安装手册](docs/INSTALL.md) | 完整安装 / 验证 / 卸载 / 故障排查 |
 | [架构说明](docs/ARCHITECTURE.md) | 架构简介与安全性设计 |
 | [发布说明](docs/NPM-PUBLISH.md) | 发布到 npm（维护者向） |
+| [版本文档](docs/versions/README.md) | 每个已发布版本的详细说明（Release 页正文只引导到这里） |
+| [发布流程](RELEASE.md) | 版本发布规矩、Release 文案格式与发布前检查清单（维护者向） |
 
 ## License
 
