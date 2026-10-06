@@ -103,7 +103,7 @@ dsh plugin --profile web remove @yannzhou/dsh-about
 > ```sh
 > bash scripts/uninstall.sh                                   # POSIX：克隆目录内
 > node scripts/uninstall.mjs                                  # Windows：默认没有 bash
-> # 或未克隆：bash <(curl -fsSL https://raw.githubusercontent.com/YannZhou/dsh-about/v1.6.1/scripts/uninstall.sh)
+> # 或未克隆：bash <(curl -fsSL https://raw.githubusercontent.com/YannZhou/dsh-about/main/scripts/uninstall.sh)
 > ```
 > 两个兜底脚本清理的目标与安全判断完全一致（`uninstall.mjs` 直接复用 `scripts/postuninstall.js` 的实现），数据目录非默认时可先设 `DSH_HOME` 再跑。
 
