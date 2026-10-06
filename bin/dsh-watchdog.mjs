@@ -75,7 +75,7 @@ function log(kind, msg) {
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 function hasBin(cmd) {
-	if (isWin) return spawnSync("where", [cmd], { stdio: "ignore", shell: true }).status === 0;
+	if (isWin) return spawnSync("where", [cmd], { stdio: "ignore", shell: true, windowsHide: true }).status === 0;
 	// 用 `command -v` 而非 `which`：极简 Linux 容器/系统可能未装 which（debianutils
 	// 成员），而 command -v 是 POSIX 内建、恒可用。
 	return spawnSync("sh", ["-c", `command -v ${cmd} >/dev/null 2>&1`]).status === 0;
@@ -121,7 +121,7 @@ function procFingerprint(pidNum) {
 		}
 	}
 	try {
-		const r = spawnSync("ps", ["-o", "lstart=", "-p", String(pidNum)], { stdio: ["ignore", "pipe", "ignore"] });
+		const r = spawnSync("ps", ["-o", "lstart=", "-p", String(pidNum)], { stdio: ["ignore", "pipe", "ignore"], windowsHide: true });
 		const s = String(r.stdout || "").trim();
 		return s === "" ? null : s;
 	} catch {
@@ -176,7 +176,16 @@ function spawnRawDetached() {
 	try {
 		const child = spawn(cmd, rest, {
 			cwd: homeDir,
+			// detached 必须保留：被拉起的 dsh 要能在本 once 看护退出后（乃至宿主
+			// 所在 cgroup/job 清理时）继续活着。
+			// Windows 实机（10.0.29680）测得：DETACHED_PROCESS 下 CREATE_NO_WINDOW
+			// 被系统忽略（windowsHide 加了也挡不住），窗口是否出现取决于被拉起
+			// 程序自己申不申请控制台——cmd.exe 会 AllocConsole 于是弹窗，而这里
+			// 拉起的 process.execPath 是 node/Electron，启动时不申请控制台，实测
+			// 不出现窗口。故 windowsHide 在此是 detached 语义下的空操作，只为与
+			// 其他调用点写法一致而保留。
 			detached: true,
+			windowsHide: true,
 			stdio: "ignore",
 			env: process.env
 		});
