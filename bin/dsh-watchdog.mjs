@@ -27,7 +27,7 @@
 // 任一阶段到上限都记日志退出，绝不静默长驻。
 import { connect } from "node:net";
 import { spawn, spawnSync } from "node:child_process";
-import { appendFileSync, mkdirSync, openSync, writeFileSync, rmSync, readFileSync, closeSync } from "node:fs";
+import { appendFileSync, mkdirSync, openSync, writeFileSync, rmSync, readFileSync, closeSync, statSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
@@ -261,18 +261,47 @@ function startService(port, unit) {
 }
 
 // ----------------------------- once：更新时的一次性看护 ----------------------
-// 加锁：并发 only-one（同 bash 的 .dsh-watchdog-once.lock 意图）
+// 加锁：并发 only-one。锁是 wx 排他创建的文件锁，进程崩溃/被强杀时锁文件会
+// 残留——若不清理，此后每次 once 都误判「已有实例」静默退出，「一键更新 →
+// 自动重启」链就此永久失效（bash 常驻版用 flock，内核随进程退出释放，无此
+// 问题；文件锁必须自己善后）。故获取失败时做陈旧判定，满足任一即删锁重试：
+//   1) 锁内记录的持有者 pid 已不存在（pidAlive 对 EPERM 保守判活，不会误清）；
+//   2) 锁文件 mtime 超过 MAX_RUNTIME + 60s（活着的 once 必在 MAX_RUNTIME 前
+//      自行退出，超时必为残留；覆盖 pid 被复用导致判活失灵的场景）。
+// 并发下两个进程同时判陈旧时，只有一个能 wx 重建成功，另一个拿到 null 退出，
+// 行为仍正确。
 function tryOnceLock() {
-	try {
-		const fd = openSync(LOCKFILE, "wx");
-		writeFileSync(fd, String(process.pid));
-		return () => {
-			try { closeSync(fd); } catch { /* 忽略 */ }
-			try { rmSync(LOCKFILE, { force: true }); } catch { /* 忽略 */ }
-		};
-	} catch {
-		return null; // 已有实例在跑
+	for (let attempt = 0; attempt < 2; attempt++) {
+		try {
+			const fd = openSync(LOCKFILE, "wx");
+			writeFileSync(fd, String(process.pid));
+			let released = false;
+			const release = () => {
+				if (released) return;
+				released = true;
+				try { closeSync(fd); } catch { /* 忽略 */ }
+				try { rmSync(LOCKFILE, { force: true }); } catch { /* 忽略 */ }
+			};
+			// 兜底：未捕获异常等走不到正常 release 的退出路径，也尽量放锁
+			process.once("exit", release);
+			return release;
+		} catch {
+			if (attempt > 0) return null; // 重试仍失败 → 确有活实例在跑
+			try {
+				const holder = Number(String(readFileSync(LOCKFILE, "utf8")).trim());
+				const ageMs = Date.now() - statSync(LOCKFILE).mtimeMs;
+				const holderDead = holder > 0 && holder !== process.pid && !pidAlive(holder, null);
+				const expired = ageMs > (MAX_RUNTIME + 60) * 1000;
+				if (holderDead || expired) {
+					log("warn", `[once] removing stale lock (holder pid=${holder || "?"}, age=${Math.round(ageMs / 1000)}s): ${LOCKFILE}`);
+					rmSync(LOCKFILE, { force: true });
+					continue;
+				}
+			} catch { /* 读不到/判不了 → 保守按有实例处理 */ }
+			return null; // 已有实例在跑
+		}
 	}
+	return null;
 }
 
 async function onceMain() {
