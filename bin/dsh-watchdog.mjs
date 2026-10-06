@@ -135,8 +135,14 @@ function pidAlive(pidNum, expectedFp) {
 	if (!pidNum || pidNum <= 0) return false;
 	try {
 		process.kill(pidNum, 0);
-	} catch {
-		return false;
+	} catch (error) {
+		// 只有 ESRCH 才说明进程确实不存在。Windows 上 libuv 的 uv_kill 走
+		// OpenProcess，权限不足（受保护进程、以更高权限运行的进程）返回 EPERM
+		// 而非 ESRCH——把这种「探测不到但活着」判成已退出，会让看护提前进入
+		// 拉起流程，与仍在运行的旧实例抢端口，日志也会误报宿主已死。
+		// 故除 ESRCH 外一律保守判存活。
+		if (error && error.code === "ESRCH") return false;
+		return true;
 	}
 	if (expectedFp === undefined || expectedFp === null) return true; // 无指纹可用
 	const fp = procFingerprint(pidNum);
