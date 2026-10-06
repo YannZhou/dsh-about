@@ -384,8 +384,8 @@ async function onceMain() {
 			if (Date.now() - activatingSince > 60 * 1000) {
 				log("warn", `[once] unit stuck in auto-restart >60s; forcing reset-failed + start ${UNIT}`);
 				if (HAS_SYSTEMCTL) {
-					spawnSync("systemctl", ["--user", "reset-failed", UNIT], { stdio: "ignore" });
-					spawnSync("systemctl", ["--user", "start", UNIT], { stdio: "ignore" });
+					spawnSync("systemctl", ["--user", "reset-failed", UNIT], { stdio: "ignore", windowsHide: true });
+					spawnSync("systemctl", ["--user", "start", UNIT], { stdio: "ignore", windowsHide: true });
 				}
 				activatingSince = 0;
 			}
