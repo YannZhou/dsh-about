@@ -1,5 +1,7 @@
 # dsh-about
 
+作者：[@YannZhou](https://github.com/YannZhou)
+
 DeepSeek Harness 设置中心「关于」分区插件：查看版本、检查更新、一键更新、看版本更新记录；也能看到**本插件自己的版本**并在有新版时一键更新它。
 
 ![dsh-about 设置中心「关于」分区](./assets/dsh-about.png)
