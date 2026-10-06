@@ -57,7 +57,7 @@ dsh plugin --profile web remove @yannzhou/dsh-about
 ```
 
 > 改名前的旧安装请用裸名卸载：`dsh plugin --profile web remove dsh-about`。
-> 运行期数据由卸载钩子自动清理，卸载后零残留。
+> 运行期数据由卸载钩子自动清理，卸载后零残留；`link:`/本地路径/tarball 安装不触发钩子时补跑兜底脚本：POSIX 用 `bash scripts/uninstall.sh`，Windows 用 `node scripts/uninstall.mjs`（两者清理目标与安全判断一致，详见 [docs/INSTALL.md](./docs/INSTALL.md)「卸载」）。
 
 ## 更多文档
 
