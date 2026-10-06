@@ -73,6 +73,26 @@
   文件清单（scoped 包必须 `publishConfig.access=public`）、`gh release view v<版本>` 正文与资产、
   `git ls-remote origin refs/heads/main refs/tags/v<版本>` 与本地一致；用 CI 发布时看 Actions 那个 run 是否绿。
 
+## 打包 / 归档：用 `git archive`，不要用 zip 压目录
+
+要把仓库交给别人（或存档快照）时，**必须**用 `git archive`，不要用「右键压缩」或 `zip -r`：
+
+```sh
+git archive --format=zip -o dsh-about-<版本>.zip HEAD
+git archive --format=tar.gz -o dsh-about-<版本>.tar.gz HEAD
+```
+
+原因：
+
+- zip 不保存 POSIX 可执行位，解包后 `bin/dsh-watchdog` 与 `bin/dsh-watchdog.mjs` 会从 `100755` 掉到 `100644`。
+  后果不是报错而是**静默降级**：看护候选表把 `X_OK` 当必要条件，Linux 上会悄悄跳过 bash 看护
+  （只剩 Node 版 `.mjs` 兜底）；同时 `git status` 会冒出两个「mode change」假改动，
+  容易被误当成「工作区脏」。
+- `git archive` 还保证只打包**已提交**内容，不会把 `node_modules/`、临时文件一起带进去。
+
+> 因此描述交付包时别写「工作区干净」这类断言：zip 解包后的 mode 差异是**打包方式**造成的，不是工作区真脏。
+> 拿到 zip 解包产物后先 `git checkout -- bin/` 恢复可执行位，再开始干活。
+
 ## 已知约束
 
 - **npm 发布后 registry 可见有数分钟延迟**：`npm publish` 输出 `Your package is being processed`。所以 CI 里「发布到 npm」成功后紧接着查可能 404，workflow 会轮询最多 10 分钟；这一步超时/红叉**不代表没发成功**，去 npm 包页面核对真实状态，别急着重发（重发同版本必被 npm 拒绝）。

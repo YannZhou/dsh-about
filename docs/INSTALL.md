@@ -11,21 +11,34 @@
 > **npm ≥ 12 用户**：npm 12 默认拦截依赖的安装脚本，dsh 的原生依赖
 > （fs-ext / koffi / node-pty / protobufjs / @google/genai / @deepseek-ai/dsh-subprocess-local）
 > 需要编译，被拦会缺产物导致 dsh 装完打不开（典型报错
-> `Cannot find module '.../build/Release/fs_ext.node'`）。请用带放行参数的命令：
+> `Cannot find module '.../build/Release/fs_ext.node'`）。
+>
+> 放行要用 npm **官方**的 `allow-scripts` 机制。⚠️ **不要再用**
+> `--dangerously-allow-all-scripts`：npm 已公告移除它，而给 npm 传不认识的旗标会
+> **直接报错退出**（`EUNKNOWNCONFIG`），不是忽略。
+>
+> 一次配好，以后手动升级都安全（推荐）：
 > ```sh
-> npm install -g --dangerously-allow-all-scripts @deepseek-ai/dsh
+> npm config set allow-scripts=fs-ext,koffi,node-pty,protobufjs,@google/genai,@deepseek-ai/dsh-subprocess-local --location=user
+> npm install -g @deepseek-ai/dsh
+> ```
+> 只想放行这一次：
+> ```sh
+> npm install -g --allow-scripts=fs-ext,koffi,node-pty,protobufjs,@google/genai,@deepseek-ai/dsh-subprocess-local @deepseek-ai/dsh
 > ```
 > 升级同理（`@deepseek-ai/dsh@latest`）。若 dsh 已经打不开（缺 `.node` 产物），
-> 加 `--force` 重装当前版本即可修复，无需降级：
+> 先按上面配好放行，再加 `--force` 重装当前版本即可修复，无需降级：
 > ```sh
-> npm install -g --dangerously-allow-all-scripts --force @deepseek-ai/dsh
+> npm install -g --allow-scripts=fs-ext,koffi,node-pty,protobufjs,@google/genai,@deepseek-ai/dsh-subprocess-local --force @deepseek-ai/dsh
 > ```
-> 本插件「一键更新」已内置：npm ≥ 12 自动附加放行参数，安装后自动校验
+> 本插件「一键更新」已内置：npm ≥ 12 自动附加官方 `allow-scripts` 白名单
+> （实际依赖树扫描 ∪ 历史原生依赖表 ∪ 你 .npmrc 里已有的条目），安装后自动校验
 > （install-scripts 警告 + dsh --version 双信号），不健康时带 `--force` 自动重装
 > 一次自愈，仍失败才报错。因此用插件更新即可，无需手动处理以上细节。
 > 插件每次启动还会自动扫描 dsh 实际依赖树，把原生模块以白名单形式追加进
 > `~/.npmrc`（只追加不覆盖，写前自动备份），手动 `npm install -g @deepseek-ai/dsh`
-> 升级同样无需操心。
+> 升级同样无需操心。卸载插件时这些条目会**保留**（它们保护的是 dsh 本体的
+> 手动升级）；确实要清掉时用 `DSH_ABOUT_NPMRC_CLEANUP=1 dsh plugin remove dsh-about`。
 
 ## 安装
 
