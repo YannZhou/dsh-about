@@ -85,10 +85,21 @@ export function installFetchStub() {
 	const calls = [];
 	let githubHandler = null;
 	let registryHandler = null;
+	let deviceCodeHandler = null;
+	let deviceTokenHandler = null;
 
 	const stub = (url, init) => {
 		const target = String(url);
 		calls.push({ url: target, init: init ?? {} });
+		// 设备码授权两个端点（在 github.com，不在 api.github.com）
+		if (target.includes("/login/device/code")) {
+			if (deviceCodeHandler === null) throw new Error(`未配置 device/code 响应：${target}`);
+			return Promise.resolve(deviceCodeHandler(target, init ?? {}));
+		}
+		if (target.includes("/login/oauth/access_token")) {
+			if (deviceTokenHandler === null) throw new Error(`未配置 access_token 响应：${target}`);
+			return Promise.resolve(deviceTokenHandler(target, init ?? {}));
+		}
 		if (target.includes("api.github.com")) {
 			if (githubHandler === null) throw new Error(`未配置 GitHub 响应：${target}`);
 			return Promise.resolve(githubHandler(target, init ?? {}));
@@ -109,14 +120,54 @@ export function installFetchStub() {
 		setRegistry(handler) {
 			registryHandler = handler;
 		},
+		/** 设定 POST /login/device/code 的响应。 */
+		setDeviceCode(handler) {
+			deviceCodeHandler = handler;
+		},
+		/** 设定 POST /login/oauth/access_token 的响应。 */
+		setDeviceToken(handler) {
+			deviceTokenHandler = handler;
+		},
 		/** 按 URL 过滤出被拦截的调用。 */
 		githubCalls() {
 			return calls.filter((c) => c.url.includes("api.github.com"));
+		},
+		deviceCodeCalls() {
+			return calls.filter((c) => c.url.includes("/login/device/code"));
+		},
+		deviceTokenCalls() {
+			return calls.filter((c) => c.url.includes("/login/oauth/access_token"));
 		},
 		restore() {
 			globalThis.fetch = original;
 		}
 	};
+}
+
+/** 造一个设备码响应（GitHub 默认返回这些字段）。 */
+export function deviceCodeResponse({ userCode = "WDJB-MJHT", deviceCode = "dev-code-xyz", interval = 5, expiresIn = 900, status = 200, body = null } = {}) {
+	return () =>
+		new Response(
+			body !== null
+				? JSON.stringify(body)
+				: JSON.stringify({
+						device_code: deviceCode,
+						user_code: userCode,
+						verification_uri: "https://github.com/login/device",
+						expires_in: expiresIn,
+						interval
+					}),
+			{ status, headers: { "content-type": "application/json" } }
+		);
+}
+
+/** 造一个 token 轮询响应：传 token 表示授权成功，传 error 表示进行中/失败。 */
+export function deviceTokenResponse({ token = null, error = null, status = 200 } = {}) {
+	return () =>
+		new Response(JSON.stringify(token !== null ? { access_token: token, token_type: "bearer" } : { error }), {
+			status,
+			headers: { "content-type": "application/json" }
+		});
 }
 
 /** 造一个 GitHub Releases 响应（默认 403 + 配额耗尽，即插件报「拉取失败」的真实场景）。 */
