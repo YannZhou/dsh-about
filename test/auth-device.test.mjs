@@ -47,6 +47,7 @@ const poll = () => post("/dsh-about/auth-device/poll");
 // ───────────── start ─────────────
 
 test("未配置 client_id 时 start 回 NO_CLIENT_ID 与注册入口，而不是报错", async () => {
+	process.env.DSH_ABOUT_GITHUB_CLIENT_ID = ""; // 显式置空：压掉发布包里的默认值
 	const res = await start();
 	assert.equal(res.status, 200);
 	assert.equal(res.json.ok, false);
@@ -56,12 +57,19 @@ test("未配置 client_id 时 start 回 NO_CLIENT_ID 与注册入口，而不是
 });
 
 test("/auth 的 deviceAvailable 反映是否配了 client_id", async () => {
+	process.env.DSH_ABOUT_GITHUB_CLIENT_ID = ""; // 先显式置空，再验「配了没有」
 	let res = await request(host.port, "/dsh-about/auth");
 	assert.equal(res.json.deviceAvailable, false);
 
 	process.env.DSH_ABOUT_GITHUB_CLIENT_ID = CLIENT_ID;
 	res = await request(host.port, "/dsh-about/auth");
 	assert.equal(res.json.deviceAvailable, true);
+});
+
+test("出厂默认：未设 env 时用的是源码里烧入的 client_id", async () => {
+	delete process.env.DSH_ABOUT_GITHUB_CLIENT_ID;
+	const res = await request(host.port, "/dsh-about/auth");
+	assert.equal(res.json.deviceAvailable, true, "发布包必须带一个可用的默认 client_id");
 });
 
 test("配置后 start 返回一次性码与验证页地址", async () => {
