@@ -1,0 +1,55 @@
+name: 测试
+
+# 零依赖包（无 dependencies / devDependencies），CI 只需 checkout + setup-node + npm test。
+# 测试全部走进程内 stub，不访问外网——因此不会因匿名 GitHub 配额耗尽（60 次/小时/IP）而假红。
+# 覆盖矩阵含 Windows：本插件对 win32 有专门分支（npm shell 解析、看护进程、0600 权限），
+# 跨平台回归必须在三平台同时拦住。
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: "24"
+
+      - name: 语法自检
+        run: node --check lib/index.js && node --check lib/client.js && node --check lib/semver.js
+
+      # tap reporter：输出稳定，便于下面按「实际通过数」兜底。
+      # 只跑一次，输出 tee 到文件供两步共用（避免重复执行）。
+      - name: 运行测试
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --test --test-reporter=tap "test/**/*.test.mjs" | tee test-output.txt
+
+      # 防空跑：用例被误删/被跳过时，node --test 仍会以 0 退出。
+      - name: 校验用例数（防空跑假绿）
+        shell: bash
+        run: |
+          set -euo pipefail
+          PASS="$(grep -E '^# pass ' test-output.txt | awk '{print $3}' | tail -1)"
+          echo "通过用例数：${PASS:-未取到}"
+          if [ -z "${PASS:-}" ] || [ "$PASS" -lt 20 ]; then
+            echo "::error::通过用例数异常（${PASS:-空}），测试可能没有真正执行"
+            exit 1
+          fi
