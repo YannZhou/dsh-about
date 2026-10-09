@@ -4,7 +4,7 @@
 
 | 文件 | 半体 | 职责 |
 |---|---|---|
-| `lib/index.js` | 宿主（Cordis 加载） | 注册 `/dsh-about/*` 同源 HTTP 路由（source / auth / auth-test / ping / describe / releases / check / versions / update / plugin / plugin-update）；更新源选择与持久化、GitHub 认证与配额回显、延迟检测；拉取 npm 与 GitHub Releases 数据；执行 `npm install -g`（dsh 本体）与 `dsh plugin add`（插件自身）；自动重启看护 |
+| `lib/index.js` | 宿主（Cordis 加载） | 注册 `/dsh-about/*` 同源 HTTP 路由（source / auth / auth-test / auth-device / ping / describe / releases / check / versions / update / plugin / plugin-update）；更新源选择与持久化、GitHub 认证与配额回显、延迟检测；拉取 npm 与 GitHub Releases 数据；执行 `npm install -g`（dsh 本体）与 `dsh plugin add`（插件自身）；自动重启看护 |
 | `lib/client.js` | 浏览器（`window.__ModuleLoader__` 模块） | 注册「关于」设置分区（`settings.section`，id: `about`）：图标、版本行、插件版本行（自更新 + 小红点）、更新源下拉、检查更新 / 一键更新弹窗、插件自更新弹窗、版本更新记录、导航红点（DOM 追加 + MutationObserver，因 slot 的 label 只接受纯文本） |
 
 - 宿主半体由 `cordis.patch.yml` 挂载；浏览器半体由包内 `dsh.client` 清单 + `exports["./client"]` 自动发现打包（`@deepseek-ai/dsh-client-modules` 机制），无需手动注册。
@@ -20,14 +20,25 @@
 - GitHub token（可选）只落盘到 `$DSH_HOME/dsh-about/auth.json`（`0600`）；接口单向写入、只回掩码，响应体与日志都不含明文。`/auth-test` 只发起一次 `api.github.com` 请求，不接受任意 URL 或任意头。
 - 能力只存在于加载了本插件的 dsh 进程内；不修改任何核心文件，卸载即完全移除。
 
-## GitHub 认证（可选 PAT）
+## GitHub 认证（在线认证 / 自定义 PAT）
 
 匿名调用 GitHub REST 按**出口 IP** 计 60 次/小时——共享代理、机房节点、公司出口很容易被打满，
 届时「版本更新记录」显示「获取版本更新失败：GitHub 接口返回 403」，且没有任何自助恢复手段。
 配置 token 后按**账号**计 5000 次/小时。
 
+两条获取路径，落地同一份凭据、同一套掩码回显：
+
+- **在线认证**：GitHub 设备码授权（`POST /auth-device/start|cancel|poll`）。client_id **随包内置**
+  （公开标识符，设备码流程不需要 `client_secret`，所以能随公开仓库分发），可用
+  `DSH_ABOUT_GITHUB_CLIENT_ID` 覆盖——判定用 `in process.env`，显式置空表示「本次视为未配置」。
+  `start` 取一次性码并下发验证页地址，前端在**点击手势里同步开窗**（异步开窗会被弹窗拦截），
+  之后按 GitHub 给的 interval 轮询 `poll`，成功即在同一进程内写盘生效。
+  前置条件：OAuth App 上必须**启用 Device Flow**；未启用时 GitHub 对任何 client_id 都返回 404，
+  因此**404 不能当 client_id 对错的判据**。
+- **自定义**：手动粘贴 PAT。
+
 - 存储：`$DSH_HOME/dsh-about/auth.json`（`0600`），只含 `token` 一个字段；
-  `POST /auth` 传空串即删除该文件。行距/空白先裁剪再落盘。
+  `POST /auth` 传空串即删除该文件（唯一能删凭据的入口）。行距/空白先裁剪再落盘。
 - 接口只回**掩码**（长值露前 4 后 4，短值只露前 2），任何响应体都不含明文；token 不写日志。
 - 生效优先级：`auth.json` > `GITHUB_TOKEN` 环境变量。环境变量只上报 `fromEnv`，
   不算「已配置」（界面清不掉它，如实说明来源）。
