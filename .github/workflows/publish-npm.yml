@@ -63,7 +63,10 @@ jobs:
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
 
       - name: 语法自检
-        run: node --check lib/index.js && node --check lib/client.js && node --check lib/semver.js
+        run: npm run check
+
+      - name: 发布前测试
+        run: npm test
 
       # 幂等：版本已在 npm 上（重复推 tag / 手工补跑）就跳过发布，不报错。
       - name: 检查该版本是否已发布

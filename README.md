@@ -4,6 +4,8 @@
 
 DeepSeek Harness 设置中心「关于」分区插件：查看版本、检查更新、一键更新、看版本更新记录；也能看到**本插件自己的版本**并在有新版时一键更新它。
 
+> **平台支持预告**：`v1.8.2` 保留 Windows / macOS / Linux 支持。从下一个版本起，dsh-about 将不再支持 Windows 和 macOS，推荐使用支持自动更新的官方桌面端。本版会向 Windows/macOS 宿主用户显示一次可关闭的提示，Linux 不弹出。详见 [v1.8.2 版本说明](docs/versions/v1.8.2.md)。
+
 ![dsh-about 设置中心「关于」分区](./assets/dsh-about.png)
 
 ## 功能
@@ -68,7 +70,7 @@ dsh plugin --profile web remove @yannzhou/dsh-about
 ```
 
 > 改名前的旧安装请用裸名卸载：`dsh plugin --profile web remove dsh-about`。
-> 运行期数据由卸载钩子自动清理，卸载后零残留；`link:`/本地路径/tarball 安装不触发钩子时补跑兜底脚本：POSIX 用 `bash scripts/uninstall.sh`，Windows 用 `node scripts/uninstall.mjs`（两者清理目标与安全判断一致，详见 [docs/INSTALL.md](./docs/INSTALL.md)「卸载」）。
+> 无人使用且没有更新/恢复/看护任务时，运行期数据由卸载钩子清理；其他 profile 使用中的共享数据会保留。`link:`/本地路径/tarball 安装不触发钩子时补跑兜底脚本：POSIX 用 `bash scripts/uninstall.sh`，Windows 用 `node scripts/uninstall.mjs`（两者清理目标与安全判断一致，详见 [docs/INSTALL.md](./docs/INSTALL.md)「卸载」）。
 
 ## 更多文档
 

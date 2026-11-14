@@ -1,10 +1,10 @@
 # 架构简介
 
-双半体插件，两个文件，零构建。
+双半体插件，宿主侧更新逻辑拆为可测试模块，零构建、零运行时依赖。
 
 | 文件 | 半体 | 职责 |
 |---|---|---|
-| `lib/index.js` | 宿主（Cordis 加载） | 注册 `/dsh-about/*` 同源 HTTP 路由（source / auth / auth-test / auth-device / ping / describe / releases / check / versions / update / plugin / plugin-update）；更新源选择与持久化、GitHub 认证与配额回显、延迟检测；拉取 npm 与 GitHub Releases 数据；执行 `npm install -g`（dsh 本体）与 `dsh plugin add`（插件自身）；自动重启看护 |
+| `lib/index.js` | 宿主（Cordis 加载） | 注册 `/dsh-about/*` 同源 HTTP 路由（source / auth / auth-test / auth-device / ping / describe / releases / check / versions / update / update-status / compatibility / plugin / plugin-update）；更新源选择与持久化、GitHub 认证与配额回显、延迟检测；拉取 npm 与 GitHub Releases 数据；执行 `npm install -g`（dsh 本体）与 `dsh plugin add`（插件自身）；自动重启看护 |
 | `lib/client.js` | 浏览器（`window.__ModuleLoader__` 模块） | 注册「关于」设置分区（`settings.section`，id: `about`）：图标、版本行、插件版本行（自更新 + 小红点）、更新源下拉、检查更新 / 一键更新弹窗、插件自更新弹窗、版本更新记录、导航红点（DOM 追加 + MutationObserver，因 slot 的 label 只接受纯文本） |
 
 - 宿主半体由 `cordis.patch.yml` 挂载；浏览器半体由包内 `dsh.client` 清单 + `exports["./client"]` 自动发现打包（`@deepseek-ai/dsh-client-modules` 机制），无需手动注册。
@@ -18,7 +18,7 @@
 - 自更新只用 `dsh plugin add`（与插件市场同一条命令）：显式指定版本号，可绕开 pnpm「新版本发布未满 24 小时」的静默回退；装完以**磁盘上的 package.json 版本**为准校验，不信 pnpm 的退出码（防假成功）。
 - `npm install -g` 带 5 分钟超时与进程组终止，安装输出尾部回显到弹窗，便于排查。
 - GitHub token（可选）只落盘到 `$DSH_HOME/dsh-about/auth.json`（`0600`）；接口单向写入、只回掩码，响应体与日志都不含明文。`/auth-test` 只发起一次 `api.github.com` 请求，不接受任意 URL 或任意头。
-- 能力只存在于加载了本插件的 dsh 进程内；不修改任何核心文件，卸载即完全移除。
+- 更新通过 npm 替换 dsh 包，不编辑核心源码；更新/看护任务可以独立于宿主存活。卸载前检查其他 profile 与活动/恢复任务，避免删除仍被使用的共享数据。
 
 ## GitHub 认证（在线认证 / 自定义 PAT）
 
@@ -63,20 +63,36 @@
 - 跨进程语义（「重启后新进程能否读到 token」）用子进程探针
   `test/helpers/probe-auth.mjs` 验证，而不是同进程再 `apply()` 一次——后者测不出模块级
   `let githubToken = readGithubToken()` 的真实行为。
-- CI：`.github/workflows/ci.yml` 在 Linux / macOS / Windows 三平台跑，并按实际通过用例数
+- 更新测试使用临时包树、npm/systemd 命令替身和随机端口服务，覆盖父进程死亡、超时、回滚与看护拉起；不会操作真实 dsh。
+- CI：`.github/workflows/ci.yml` 在 Linux / macOS / Windows、Node 18/24 矩阵运行，并按实际通过用例数
   设下限，防「用例被删光但 CI 仍绿」。
 
 ## 更新与自动重启
 
-更新成功后，dsh web 的自动重启委托给包内的一次性看护 `dsh-watchdog once`：等宿主退出 → 等 3 秒 → 优先 `systemctl --user start dsh-web`，systemd 不可用才退回落 `dsh web --no-open` → 端口就绪后看护自动退出、零常驻。决策日志在 `$DSH_HOME/dsh-watchdog.log`。
+`POST /update` 验证目标已发布后返回 `202` 与任务 ID。独立事务复制运行代码到数据目录，按“快照 → 安装 → 校验 → 重试/回滚”执行，并把阶段和最终结果原子写入 `update-state.json`；`GET /update-status` 支持前端断线和宿主重启后的接续。`update.lock` 同时保护 dsh 与插件更新。
+
+| 模块 | 职责 |
+|---|---|
+| `install-context.mjs` | 实际 dsh 包根、当前 Node/npm、prefix、CLI 链接、peer provider |
+| `update-jobs.mjs` / `update-worker.mjs` | 分离任务、复制运行代码、启动确认和持久结果 |
+| `update-transaction.mjs` | 独立快照、安装、版本核验、重试与回滚 |
+| `process-runner.mjs` | 进程组/Windows 进程树终止、systemd 安装单元停止确认 |
+| `background-launch.mjs` / `background-entry.mjs` | 脱离宿主派发和安全传递环境 |
+| `update-state.mjs` / `update-recovery.mjs` | 文件锁、任务所有者与异常恢复 |
+
+Linux systemd 下，事务与 npm 安装分属独立 transient unit。安装超时必须确认其 `KillMode=control-group` 单元已停止后才回滚。敏感环境以 `0600` 临时文件传递，不作为 `--setenv` 明文参数。事务本身被强杀时保留快照并禁止新安装，使用 `node scripts/recover-update.mjs` 显式恢复。
+
+
+启动器成功且看护确认初始化后，宿主才会退出。更新成功后，dsh web 的自动重启委托给包内的一次性看护 `dsh-watchdog once`：等宿主退出 → 等 3 秒 → 优先 `systemctl --user start dsh-web`，systemd 不可用才退回落 `dsh web --no-open` → 端口就绪后看护自动退出、零常驻。决策日志在 `$DSH_HOME/dsh-watchdog.log`。
 
 - `bin/dsh-watchdog.mjs`（纯 Node）：三平台首选，node 是 dsh 运行时必有依赖，零新增依赖，Windows / macOS / Linux 同一套。
-- `bin/dsh-watchdog`（bash）：Linux 专用，覆盖「常驻 + systemd 用户服务」高级场景及无 node 环境的兜底。
+- `bin/dsh-watchdog`（bash）：Linux 专用，覆盖「常驻 + systemd 用户服务」高级场景。
 - **Linux + systemd 的特殊性**：看护进程放进独立 transient 单元（独立 cgroup）。实测宿主退出时 systemd 会清空 dsh-web 服务 cgroup 内的全部子进程，普通 detached 派生必死；transient 单元不受影响。更新后"白屏无人拉起"的根因即此。
-- **macOS / Windows**：无 systemd，宿主 detached 派生 Node 看护即可；Windows 下 npm 走 `npm.cmd`、进程树终止走 `taskkill /T /F`，均已适配。
+- **macOS / Windows**：无 systemd，宿主 detached 派生 Node 看护。npm 优先由当前 Node 执行 npm CLI JS；Windows 进程树终止使用 `taskkill /T /F`。
 
 ## 兼容性
 
+- `v1.8.2` 保留现有三平台实现；下一版本起停止 Windows/macOS 支持。浏览器半体根据宿主 `/describe.platform`（不是浏览器系统）显示一次迁移提示，Linux 不显示。固定 `localStorage` 标记按浏览器/站点记忆，禁用存储时退回模块内记忆；支持按钮、Esc 和遮罩关闭，并管理键盘焦点。
 - dsh CLI：0.x 全线支持（`dsh plugin add/remove` + `cordis.patch.yml` insert 层）。
 - 客户端图机制分界：dsh **0.1.2 起**按「包自身 name」给插件建客户端启动图，之前的版本接受裸名。本插件 1.6.0 起按新机制对齐（见下）。
 

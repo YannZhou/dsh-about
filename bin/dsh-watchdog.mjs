@@ -234,25 +234,34 @@ function startService(port, unit) {
 			log("warn", `unhandled unit state: ${st}`);
 		}
 	}
-	if (IN_TRANSIENT && HAS_SYSTEMD_RUN) {
+	if (IN_TRANSIENT) {
+		if (!HAS_SYSTEMD_RUN) {
+			log("warn", "independent raw launch unavailable; refusing a child that would die with this unit");
+			return false;
+		}
 		// 用独立 transient 单元启动裸命令（避免 once 退出时被 cgroup 清理连带）
-		const rawUnit = `dsh-web-raw-${Math.floor(Date.now() / 1000)}`;
-		const args = ["--user", "--collect", `--unit=${rawUnit}`, `--setenv=PATH=${process.env.PATH || "/usr/local/bin:/usr/bin:/bin"}`];
+		const rawUnit = `dsh-web-raw-${process.pid}-${Date.now()}`;
+		const args = ["--user", "--collect", "--property=Type=exec", `--unit=${rawUnit}`];
+		const payload = path.join(homeDir, `.dsh-watchdog-launch-${process.pid}-${Date.now()}.json`);
 		let r;
-		if (RAW_ARGV && RAW_ARGV.length > 0) {
-			// systemd-run [flags] <cmd> [args...]：RAW_ARGV 首元素是命令
-			r = spawnSync("systemd-run", [...args, ...RAW_ARGV], { stdio: "ignore", timeout: 15000 });
-		} else if (RAW_CMD_STR) {
-			r = spawnSync("systemd-run", [...args, "/usr/bin/bash", "-c", `cd "${homeDir}" && exec ${RAW_CMD_STR}`], { stdio: "ignore", timeout: 15000 });
-		} else {
-			r = { status: 1 };
+		try {
+			const argv = RAW_ARGV || (RAW_CMD_STR ? ["/bin/sh", "-c", RAW_CMD_STR] : null);
+			if (!argv) return false;
+			writeFileSync(payload, JSON.stringify({ argv, env: process.env, cwd: homeDir }), { mode: 0o600, flag: "wx" });
+			// Preserve the complete environment without credentials in process args.
+			// The supervisor stays alive with dsh, keeping its transient unit alive.
+			const bootstrap = `const fs=require('node:fs');const{spawn}=require('node:child_process');const file=process.argv[1];const c=JSON.parse(fs.readFileSync(file,'utf8'));fs.rmSync(file);const child=spawn(c.argv[0],c.argv.slice(1),{env:c.env,cwd:c.cwd,stdio:'inherit',windowsHide:true});child.once('error',()=>{process.exitCode=1;});child.once('close',code=>{process.exitCode=code??1;});`;
+			r = spawnSync("systemd-run", [...args, process.execPath, "-e", bootstrap, payload], { stdio: "ignore", timeout: 15000, windowsHide: true });
+		} catch { r = { status: 1 }; }
+		if (r.status !== 0) {
+			try { rmSync(payload, { force: true }); } catch {}
 		}
 		if (r.status === 0) {
 			log("info", `raw launch via systemd-run (unit=${rawUnit})`);
 			return true;
 		}
-		log("warn", "systemd-run raw launch failed -> detached fallback");
-		// 落入 detached 兜底
+		log("warn", "independent systemd raw launch failed; will retry");
+		return false;
 	}
 	log("info", `raw launch: ${describeRaw()}`);
 	const ok = spawnRawDetached();
@@ -308,7 +317,12 @@ async function onceMain() {
 	const release = tryOnceLock();
 	if (!release) {
 		log("warn", `[once] another watchdog once already running (lock=${LOCKFILE}); exiting`);
-		process.exit(0);
+		process.exit(1);
+	}
+	// Launcher waits for this acknowledgement before allowing the host to exit.
+	if (env.DSH_WATCH_READY) {
+		try { writeFileSync(env.DSH_WATCH_READY, JSON.stringify({ ready: true, pid: process.pid }), { mode: 0o600, flag: "wx" }); }
+		catch (error) { release(); throw error; }
 	}
 	const deadline = Date.now() + MAX_RUNTIME * 1000;
 	log("info", `[once] pid=${pid} port=${PORT} unit=${UNIT} raw=${describeRaw()}`);

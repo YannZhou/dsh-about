@@ -122,7 +122,7 @@ dsh plugin --profile web remove @yannzhou/dsh-about
 移除后配置树不再含对应 dsh-about 行；浏览器刷新后「关于」分区消失。
 
 > 运行期数据（`$DSH_HOME/dsh-about`、`$DSH_HOME/dsh-watchdog.log` 等）由包内卸载钩子
-> `scripts/postuninstall.js` 自动清理；仅 pnpm 对 `link:`/本地路径安装不执行该钩子，
+> `scripts/postuninstall.js` 在无人使用且没有更新/恢复/看护任务时清理；其他 profile 的共享数据会保留。pnpm 对 `link:`/本地路径安装可能不执行该钩子，
 > 此时请补跑兜底脚本：POSIX 用 `bash scripts/uninstall.sh`，Windows（默认无 bash）用
 > `node scripts/uninstall.mjs`；两者清理目标与安全判断一致（见仓库 README「卸载」一节）。
 

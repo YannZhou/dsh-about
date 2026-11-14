@@ -110,13 +110,13 @@ dsh plugin --profile web remove @yannzhou/dsh-about
 - **文件层**：profile node_modules 里的包实体（含内置看护脚本）随包删除。
 - **进程**：更新链路的一次性看护进程在端口就绪后自动退出，不驻留。
 
-运行期数据（`$DSH_HOME/dsh-about/` 数据目录、`$DSH_HOME/dsh-watchdog.log`、`$DSH_HOME/dsh-about-restart.log`、锁文件）由卸载钩子 `scripts/postuninstall.js` 自动清理。
+运行期数据（`$DSH_HOME/dsh-about/` 数据目录、日志与锁文件）在没有其他 profile 使用、没有更新或恢复任务、也没有活动看护时，由 `scripts/postuninstall.js` 清理。仍在使用或需要恢复的共享数据会保留。
 
 > **钩子触发条件**：npm 安装会正常触发 postuninstall；但 `link:` / 本地路径 / `file:` tarball 安装不触发（GitHub `git+` 视 pnpm 解析形态也可能不触发）。未触发时补跑兜底脚本：
 > ```sh
 > bash scripts/uninstall.sh                                   # POSIX：克隆目录内
 > node scripts/uninstall.mjs                                  # Windows：默认没有 bash
-> # 或未克隆：bash <(curl -fsSL https://raw.githubusercontent.com/YannZhou/dsh-about/main/scripts/uninstall.sh)
+> # 两个入口均须在完整项目目录中运行（共用 Node 清理逻辑）。
 > ```
 > 两个兜底脚本清理的目标与安全判断完全一致（`uninstall.mjs` 直接复用 `scripts/postuninstall.js` 的实现），数据目录非默认时可先设 `DSH_HOME` 再跑。
 
@@ -132,3 +132,16 @@ dsh plugin --profile web remove @yannzhou/dsh-about
 | 「检查更新」报错 | 确认机器能访问 registry.npmjs.org 与 api.github.com |
 | 更新后自动重启未完成 | 新版本已装好时属安全降级：手动执行 `dsh web` 即可 |
 | 安装失败提示依赖解析 | 本包零运行时依赖（semver 已内嵌），报错多为镜像 / 网络问题，换源重试 |
+
+
+## 更新中断后的恢复
+
+更新进度和结果保存在 `$DSH_HOME/dsh-about/update-state.json`，诊断日志为同目录的 `update.log`。宿主退出不会终止独立事务。若事务进程本身被强杀，页面会报告中断并保留快照；需要恢复时禁止启动新的安装。
+
+先确认安装任务停止，再在完整项目目录运行 `node scripts/recover-update.mjs`。非默认目录须使用原来的 `DSH_HOME`。恢复脚本核对原任务配置、进程和 systemd 安装单元，成功恢复并验证旧版 CLI 后才解除互斥。不要直接删除锁或唯一快照来绕过保护。
+
+插件自身更新中断也使用该命令恢复。先关闭发起更新的原 dsh 宿主，并确认安装进程停止；脚本根据保存的 profile 检查已安装插件的清单、入口文件、浏览器脚本语法及宿主模块依赖能否加载，通过后解除更新阻塞。插件没有本体回滚快照，此流程不会回滚插件版本；检查失败时会继续保留阻塞，请在原 profile 手动重新安装插件，再运行恢复命令。
+
+旧任务未记录 profile 时，脚本只在安装位置唯一时自动推断。多 profile 同时声明插件时，显式指定原安装位置，例如 `node scripts/recover-update.mjs --profile web`。恢复成功后重新启动 dsh。异常退出遗留的 `update.lock.reclaim` 会在持有者失效且文件超过 20 秒后安全回收，仍存活的锁持有者不会被抢占。
+
+成功更新会保留旧版快照；请按需管理 `$DSH_HOME/dsh-about/backups/` 的磁盘占用，仅在确认没有任务和待恢复状态后清理不再需要的历史备份。

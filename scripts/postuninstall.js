@@ -1,10 +1,12 @@
 // dsh-about 卸载清理钩子（package.json "scripts".postuninstall）：
 // 由 `dsh plugin --profile <name> remove dsh-about` 触发（pnpm remove 执行生命周期脚本）。
-// 职责：删除插件运行期在宿主之外产生的全部痕迹，保证「拔除即干净、零残留」。
+// 职责：无人使用且无活动/恢复任务时清理插件运行期数据；保留共享使用的数据。
 // 本脚本只清理 dsh-about / dsh-watchdog 明确写入的路径，绝不越界删除用户数据。
-import { rmSync, existsSync, readdirSync, lstatSync, readFileSync, writeFileSync } from "node:fs";
+import { rmSync, existsSync, readdirSync, lstatSync, readFileSync, writeFileSync, statSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { secureBackup } from "../lib/secure-file.mjs";
+import { readUpdateStatus, ownerAlive } from "../lib/update-state.mjs";
 
 const home = process.env.DSH_HOME || path.join(os.homedir(), ".dsh");
 const targets = [
@@ -16,18 +18,6 @@ const targets = [
 ];
 
 let cleaned = 0;
-for (const target of targets) {
-	try {
-		if (existsSync(target)) {
-			rmSync(target, { recursive: true, force: true });
-			cleaned += 1;
-			process.stdout.write(`[dsh-about] 已清理残留: ${target}\n`);
-		}
-	} catch (error) {
-		process.stdout.write(`[dsh-about] 清理 ${target} 失败(已忽略): ${String(error.message)}\n`);
-	}
-}
-
 // ── 残留的包实体目录：pnpm remove 之后插件实体可能残留在三类位置 ──
 //   1) <profile>/node_modules/@yannzhou/dsh-about（scoped：新安装）或 node_modules/dsh-about（旧裸名）
 //   2) <profile>/.dsh-module-fallback/node_modules/<name>（该 profile 的模块回退镜像）
@@ -43,6 +33,7 @@ const PACKAGE_NAMES = ["@yannzhou/dsh-about", "dsh-about"];
 function manifestDeclares(manifest) {
 	try {
 		const text = readFileSync(manifest, "utf8");
+		JSON.parse(text); // Invalid manifests must conservatively retain shared data.
 		// 命中任何形式的包名（scoped 串前导是 "/" 而非引号，故用子串 includes 命中两者；
 		// 每个候选都带引号，避免误命中 null/裸串形式的相邻文本）
 		return PACKAGE_NAMES.some((name) => text.includes(`"${name}"`));
@@ -55,21 +46,52 @@ const profilesRoot = path.join(home, "profiles");
 let profiles;
 try {
 	profiles = readdirSync(profilesRoot, { withFileTypes: true })
-		.filter((entry) => entry.isDirectory())
+		.filter((entry) => { try { return statSync(path.join(profilesRoot, entry.name)).isDirectory(); } catch { return false; } })
 		.map((entry) => path.join(profilesRoot, entry.name))
 		.filter((dir) => existsSync(path.join(dir, "package.json")));
 } catch {
 	profiles = [];
+	// An unreadable profile tree must not authorize deletion.
+	if (existsSync(profilesRoot)) profiles.push(profilesRoot);
 }
 
-let stillDeclared = profiles.some((dir) => manifestDeclares(path.join(dir, "package.json")));
+const sharedManifests = [path.join(home, "package.json"), path.join(profilesRoot, "package.json")].filter(existsSync);
+const stillDeclared = [...profiles.map((dir) => path.join(dir, "package.json")), ...sharedManifests].some(manifestDeclares);
+const directory = path.join(home, "dsh-about");
+const status = readUpdateStatus(directory);
+const activeWatchdog = [".dsh-watchdog.lock", ".dsh-watchdog-once.lock"].some((name) => {
+	try {
+		const text = readFileSync(path.join(home, name), "utf8").trim();
+		const holder = /^\d+$/.test(text) ? { pid: Number(text) } : JSON.parse(text).owner;
+		return ownerAlive(holder);
+	} catch { return existsSync(path.join(home, name)); }
+});
+const activeTask = status.inProgress || status.needsRecovery || existsSync(path.join(directory, "update.lock")) || activeWatchdog;
+if (stillDeclared || activeTask) {
+	process.stdout.write("[dsh-about] 保留共享数据（仍有 profile 声明、更新待恢复或看护正在运行）。\n");
+} else {
+	for (const target of targets) {
+		try {
+			if (existsSync(target)) {
+				rmSync(target, { recursive: true, force: true });
+				cleaned += 1;
+				process.stdout.write(`[dsh-about] 已清理残留: ${target}\n`);
+			}
+		} catch (error) {
+			process.stdout.write(`[dsh-about] 清理 ${target} 失败(已忽略): ${String(error.message)}\n`);
+		}
+	}
+}
+
 
 function removeIfUnused(entityDir, describe) {
+	if (activeTask) return;
 	let isLink = false;
 	let exists;
 	try {
-		exists = existsSync(entityDir);
-		if (exists) isLink = lstatSync(entityDir).isSymbolicLink();
+		const entry = lstatSync(entityDir);
+		exists = true;
+		isLink = entry.isSymbolicLink();
 	} catch {
 		return; // 不存在或读不到 → 无需清理，静默
 	}
@@ -141,7 +163,7 @@ const DSHA_ALLOW_MARK_PREFIX = "# dsh-about: npm>=12 allow-scripts";
 
 /** 按需清理本插件写进用户 .npmrc 的 allow-scripts 条目（返回清理项数，0 表示未改动）。 */
 function cleanAllowScriptsEntries() {
-	const rcPath = process.env.NPM_CONFIG_USERCONFIG || path.join(os.homedir(), ".npmrc");
+	const rcPath = process.env.NPM_CONFIG_USERCONFIG || process.env.npm_config_userconfig || path.join(os.homedir(), ".npmrc");
 	let raw;
 	try {
 		raw = readFileSync(rcPath, "utf8");
@@ -178,7 +200,7 @@ function cleanAllowScriptsEntries() {
 	if (next === raw) return 0;
 	try {
 		const backup = `${rcPath}.dsh-about-uninstall.bak-${new Date().toISOString().slice(0, 10).replace(/-/g, "")}`;
-		if (!existsSync(backup)) writeFileSync(backup, raw, "utf8");
+		secureBackup(backup, raw);
 		writeFileSync(rcPath, next, "utf8");
 		return 1;
 	} catch {
@@ -186,7 +208,7 @@ function cleanAllowScriptsEntries() {
 	}
 }
 
-if (/^(1|on|true|yes)$/i.test(String(process.env.DSH_ABOUT_NPMRC_CLEANUP ?? "").trim())) {
+if (!stillDeclared && !activeTask && /^(1|on|true|yes)$/i.test(String(process.env.DSH_ABOUT_NPMRC_CLEANUP ?? "").trim())) {
 	const n = cleanAllowScriptsEntries();
 	process.stdout.write(
 		n > 0
