@@ -25,7 +25,7 @@ test("custom prefix and bin.dsh follow the running host", t => {
  const context = resolveInstallContext(f.installRoot, f.context.npm);
  assert.equal(context.prefix, f.prefix);
  assert.equal(cliEntry(f.installRoot), path.join(f.installRoot, "bin", "dsh.mjs"));
- assert.equal(packageRootFromEntry(cliEntry(f.installRoot), "@deepseek-ai/dsh"), f.installRoot);
+ assert.equal(packageRootFromEntry(cliEntry(f.installRoot), "@deepseek-ai/dsh"), fs.realpathSync(f.installRoot));
  assert.equal(resolveNpmCommand().shell, false);
 });
 
@@ -289,9 +289,9 @@ test("snapshot rejects a backup directory inside the installation", t => {
 test("snapshot preserves dependency cycles entirely inside the backup", {skip:process.platform==="win32"}, async t=>{
  const f=fixture(t); fs.mkdirSync(path.join(f.installRoot,"deps")); fs.symlinkSync(f.installRoot,path.join(f.installRoot,"deps","self"),"dir");
  const saved=snapshotInstall(f.context,f.config.backupDir);
- assert.equal(fs.realpathSync(path.join(saved.snapshot,"deps","self")),saved.snapshot);
+ assert.equal(fs.realpathSync(path.join(saved.snapshot,"deps","self")),fs.realpathSync(saved.snapshot));
  const result=await restoreSnapshot(f.context,saved); assert.equal(result.ok,true,result.error);
- assert.equal(fs.realpathSync(path.join(f.installRoot,"deps","self")),f.installRoot);
+ assert.equal(fs.realpathSync(path.join(f.installRoot,"deps","self")),fs.realpathSync(f.installRoot));
 });
 
 test("secure bootstrap preserves custom env through a clean systemd manager environment", async t=>{
@@ -350,11 +350,20 @@ test("npm transient service gets pinned config despite a clean manager environme
 });
 
 test("watchdog acknowledges initialization before any host exit",async t=>{
- const f=fixture(t); const readyFile=path.join(f.base,"watchdog-ready.json");
+ const f=makeFixture(); const readyFile=path.join(f.base,"watchdog-ready.json");
+ t.after(async()=>{
+  const owner=readJson(readyFile);
+  if(ownerAlive(owner)) {
+   try { process.kill(owner.pid,"SIGTERM"); } catch(error) { if(error.code!=="ESRCH") throw error; }
+   await until(()=>!ownerAlive(owner));
+  }
+  // The watchdog can still write its initial log after acknowledging readiness.
+  // Stop it before deleting the fixture, including on Windows / Node 18.
+  f.cleanup();
+ });
  const watchdog=new URL("../bin/dsh-watchdog.mjs",import.meta.url);
  const {fileURLToPath}=await import("node:url");
  const ready=await launchBackground(fileURLToPath(watchdog),["once"],{directory:f.base,readyFile,systemdRun:null,env:{...process.env,DSH_HOME:f.base,DSH_WATCH_PID:String(process.pid),DSH_WATCH_PORT:"9",DSH_WATCH_NO_SYSTEMD:"1",DSH_WATCH_READY:readyFile}});
- t.after(()=>{try{process.kill(ready.pid,"SIGTERM");}catch{}});
  assert.equal(ready.ready,true);assert(ownerAlive({pid:ready.pid}));
 });
 
