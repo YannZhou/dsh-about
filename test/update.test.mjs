@@ -123,6 +123,9 @@ for (const mode of ["success", "fail"]) test(`worker survives host death and per
  const state = readUpdateStatus(f.config.directory);
  assert.equal(state.inProgress, false); assert.equal(state.result.ok, mode === "success", JSON.stringify(state)); assert.equal(installed(f), mode === "success" ? "1.2.4" : "1.2.3");
  if (mode === "fail") assert.equal(state.result.rolledBack, true);
+ // The worker persists its result before releasing the lock in finally.
+ // Observing the terminal state does not mean that cleanup has finished yet.
+ await until(() => !fs.existsSync(path.join(f.config.directory, "update.lock")));
  assert(!fs.existsSync(path.join(f.config.directory, "update.lock")));
  const jobDir = path.join(f.config.directory, "jobs", state.id);
  assert(fs.existsSync(path.join(jobDir, "runtime", "update-transaction.mjs")));
