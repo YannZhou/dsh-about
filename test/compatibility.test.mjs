@@ -30,6 +30,14 @@ const cases = [
 ];
 for (const [actual, range, expected] of cases) test(`peer ${actual} satisfies ${JSON.stringify(range)} -> ${expected}`, () => assert.equal(satisfies(actual, range), expected));
 
+const dshPrereleasePeerRanges = [
+ ["0.2.2-rc.3", "^0.1.0-rc.6 || ^0.1.2-alpha.2 || ^0.2.0-rc.1"],
+ ["0.2.2-rc.3", "^0.1.7-rc.1 || ^0.2.0-rc.1"],
+ ["0.2.2-rc.3", "^0.1.0-rc.7 || ^0.1.1-rc.2 || ^0.1.2-alpha.2 || ^0.2.0-rc.1 || ^0.2.1-alpha.3 || ^0.2.1-rc.1"]
+];
+for (const [actual, range] of dshPrereleasePeerRanges) test("dsh prerelease policy accepts " + actual + " for " + JSON.stringify(range), () => assert.equal(satisfies(actual, range, { includePrerelease: true }), true));
+test("dsh prerelease policy still rejects an unrelated prerelease", () => assert.equal(satisfies("0.3.0-rc.1", "^0.1.7-rc.1 || ^0.2.0-rc.1", { includePrerelease: true }), false));
+
 function writePackage(dir, pkg) { fs.mkdirSync(dir, { recursive: true }); fs.writeFileSync(path.join(dir, "package.json"), JSON.stringify(pkg)); }
 test("scan linked scopes/plugins across all profiles using profile and actual host providers", { skip: process.platform === "win32" }, t => {
  const f = makeFixture(); t.after(() => f.cleanup());
@@ -44,4 +52,21 @@ test("scan linked scopes/plugins across all profiles using profile and actual ho
  writePackage(path.join(modules,"@deepseek-ai","dsh-core"), { name:"@deepseek-ai/dsh-core",version:"9.0.0" });
  const warnings=pluginPeerWarningsFor(home,f.installRoot);
  assert.equal(warnings.length,1); assert.equal(warnings[0].profile,"custom"); assert.equal(warnings[0].plugin,"@fixture/plugin"); assert.equal(warnings[0].mismatches.length,1); assert.match(warnings[0].mismatches[0],/has 9.0.0/);
+});
+
+test("does not warn for installed plugins whose peer ranges admit the host prerelease", { skip: process.platform === "win32" }, t => {
+ const f = makeFixture(); t.after(() => f.cleanup());
+ const home = path.join(f.base, "prerelease-home");
+ const modules = path.join(home, "profiles", "web", "node_modules");
+ const hostPeer = path.join(f.installRoot, "node_modules", "@deepseek-ai", "dsh-settings");
+ writePackage(hostPeer, { name: "@deepseek-ai/dsh-settings", version: "0.2.2-rc.3", exports: { "./package.json": "./package.json" } });
+ const fixtures = [
+  ["@magiczerowxy/dsh-modef", "0.2.8", "^0.1.0-rc.6 || ^0.1.2-alpha.2 || ^0.2.0-rc.1"],
+  ["dsh-joi-channel-theme", "0.2.0", "^0.1.7-rc.1 || ^0.2.0-rc.1"],
+  ["dshmarket", "1.73.19", "^0.1.0-rc.7 || ^0.1.1-rc.2 || ^0.1.2-alpha.2 || ^0.2.0-rc.1 || ^0.2.1-alpha.3 || ^0.2.1-rc.1"]
+ ];
+ for (const [name, version, range] of fixtures) writePackage(path.join(modules, name), { name, version, peerDependencies: { "@deepseek-ai/dsh-settings": range } });
+ assert.deepEqual(pluginPeerWarningsFor(home, f.installRoot), []);
+ fs.writeFileSync(path.join(hostPeer, "package.json"), JSON.stringify({ name: "@deepseek-ai/dsh-settings", version: "0.3.0-rc.1", exports: { "./package.json": "./package.json" } }));
+ assert.equal(pluginPeerWarningsFor(home, f.installRoot).length, 3);
 });
