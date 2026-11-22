@@ -148,5 +148,5 @@ dsh plugin --profile web remove @yannzhou/dsh-about
 
 ---
 
-*AI 执行注意：本插件更新动作会在 Web UI 内执行 `npm install -g @deepseek-ai/dsh@<版本>`
+*AI 执行注意：本插件更新动作会先在隔离目录试装并校验目标版本，再执行 `npm install -g @deepseek-ai/dsh@<版本>`
 并自动重启 dsh web，属预期行为；安装本插件本身不做任何全局安装。*

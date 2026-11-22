@@ -11,6 +11,7 @@ import { runCommand } from "../lib/process-runner.mjs";
 import { startUpdateJob, waitForUpdateJob } from "../lib/update-jobs.mjs";
 import { acquireUpdateLock, releaseUpdateLock, readUpdateStatus, writeJsonAtomic, readJson, processIdentity, ownerAlive, sleep } from "../lib/update-state.mjs";
 import { launchBackground } from "../lib/background-launch.mjs";
+import { lastUpdateFailure, recordUpdateFailure, updateFailureHistory } from "../lib/update-diagnostics.mjs";
 
 async function until(predicate, timeout = 10000) {
  const deadline = Date.now() + timeout;
@@ -58,6 +59,60 @@ test("independent transaction pins prefix/registry and repairs missing CLI", asy
  assert.equal((await verifyInstall(f.context, "1.2.4")).ok, true);
 });
 
+test("preflight blocks an incompatible Node before invoking npm or creating a snapshot", async t => {
+ const f = fixture(t);
+ const result = await runUpdateTransaction({ ...f.config, preflight: true, nodeRange: ">=999.0.0" });
+ assert.equal(result.failureStage, "preflight");
+ assert.equal(result.checks[0].issue, "node-version");
+ assert(!fs.existsSync(f.calls));
+ assert(!fs.existsSync(f.config.backupDir));
+ assert.equal(installed(f), "1.2.3");
+});
+
+test("isolated missing-export failure records the actual dependency and leaves the live tree alone", async t => {
+ const f = fixture(t, "module-export");
+ const job = await startUpdateJob({ ...f.config, preflight: true }, { systemdRun: null });
+ const result = await waitForUpdateJob(f.config.directory, job.id);
+ assert.equal(result.ok, false);
+ assert.equal(result.failureStage, "preflight");
+ assert.equal(installed(f), "1.2.3");
+ assert(!fs.existsSync(f.config.backupDir));
+ const calls = fs.readFileSync(f.calls, "utf8").trim().split("\n").map(JSON.parse);
+ assert.equal(calls.length, 1, "a deterministic error should not trigger force reinstall");
+ assert.notEqual(calls[0].prefix, f.prefix);
+ assert(!fs.existsSync(path.dirname(calls[0].prefix)), "temporary installation should be removed");
+ const report = lastUpdateFailure(f.config.directory);
+ assert.equal(report.issue, "module-export");
+ assert.match(report.summary, /EntryValidationError/);
+ assert.deepEqual(report.checks.map(({ phase, code, dependency }) => ({ phase, code, dependency })), [
+  { phase: "preflight-install", code: 0, dependency: undefined },
+  { phase: "preflight-cli", code: 1, dependency: { name: "fixture-loader", version: "1.1.0" } }
+ ]);
+ const jobDir = path.join(f.config.directory, "jobs", job.id);
+ await until(() => !fs.existsSync(path.join(f.config.directory, "update.lock")));
+ assert.equal(readJson(path.join(jobDir, "failure.json")).issue, "module-export");
+});
+
+test("Web preflight completes the local login redirect before allowing a live update", async t => {
+ const f = fixture(t, "web");
+ const result = await runUpdateTransaction({
+  ...f.config, preflight: true, restart: {}, processOptions: { env: { FIXTURE_PASSWORD: "fixture-private" } }
+ });
+ assert.equal(result.ok, true, JSON.stringify(result.checks));
+ assert.equal(installed(f), "1.2.4");
+ assert.deepEqual(result.checks.map(check => check.phase), ["preflight-install", "preflight-cli", "preflight-web", "install", "cli"]);
+ assert(!JSON.stringify(result).includes("fixture-private"));
+});
+
+test("a deterministic CLI failure on the live installation rolls back without a second write", async t => {
+ const f = fixture(t, "module-export");
+ const result = await runUpdateTransaction(f.config);
+ assert.equal(result.ok, false);
+ assert.equal(result.rolledBack, true);
+ assert.equal(installed(f), "1.2.3");
+ assert.equal(fs.readFileSync(f.calls, "utf8").trim().split("\n").length, 1);
+});
+
 test("blocked scripts trigger one force retry with a supported escape flag", async t => {
  const f = fixture(t, "blocked");
  const result = await runUpdateTransaction(f.config);
@@ -91,6 +146,10 @@ test("timeout stops stubborn installer and descendant writes before rollback", {
  await sleep(120);
  assert.equal(fs.readFileSync(path.join(f.base, "writes"), "utf8"), writes);
  assert.equal(installed(f), "1.2.3"); assert.equal(fs.readFileSync(f.calls, "utf8").trim().split("\n").length, 1, "timeout must not start another installer");
+ const timeoutCheck = result.checks.find(check => check.phase === "install");
+ assert.equal(timeoutCheck.issue, "install-timeout");
+ const report = lastUpdateFailure(f.config.directory, { id: "t", kind: "dsh", target: "1.2.4", inProgress: false, stage: "failed", finishedAt: 1, result: { ...result, failureStage: "installing" } });
+ assert.match(report.hint, /代理|更新源/);
 });
 
 test("termination failure keeps the snapshot and never rolls back over a live writer", { skip: process.platform === "win32" }, async t => {
@@ -147,6 +206,46 @@ test("stale worker is reported as interrupted and recovery data blocks new mutat
  const state = readUpdateStatus(f.config.directory);
  assert.equal(state.inProgress, false); assert.equal(state.stage, "interrupted"); assert.equal(state.needsRecovery, true);
  assert.throws(() => acquireUpdateLock(f.config.directory, "dsh", "2.0.0"), /需要恢复/);
+});
+
+test("an interrupted isolated check leaves no live recovery requirement", t => {
+ const f = fixture(t);
+ writeJsonAtomic(path.join(f.config.directory, "update-state.json"), {
+  id: "old", kind: "dsh", inProgress: true, stage: "preflight", owner: { pid: 2147483647 }, installer: { pid: 2147483646 }
+ });
+ const state = readUpdateStatus(f.config.directory);
+ assert.equal(state.stage, "interrupted");
+ assert.equal(state.needsRecovery, false);
+ assert.equal(lastUpdateFailure(f.config.directory).stage, "preflight");
+ const lock = acquireUpdateLock(f.config.directory, "dsh", "2.0.0");
+ releaseUpdateLock(f.config.directory, lock);
+});
+
+test("a clean success hides but keeps the stored failure report", t => {
+ const f = fixture(t);
+ const file = path.join(f.config.directory, "last-update-failure.json");
+ const failed = { id: "old", kind: "dsh", target: "1.2.4", inProgress: false, stage: "failed", finishedAt: 100, result: { ok: false, error: "旧失败", out: "" } };
+ recordUpdateFailure(f.config.directory, failed);
+ assert.equal(lastUpdateFailure(f.config.directory).id, "old");
+ assert(fs.existsSync(file));
+ const success = { id: "new", kind: "dsh", target: "1.2.4", inProgress: false, stage: "installed", finishedAt: 200, result: { ok: true, installedVersion: "1.2.4" } };
+ // A success already in update-state hides the old report but never deletes it.
+ assert.equal(lastUpdateFailure(f.config.directory, success), null);
+ recordUpdateFailure(f.config.directory, success);
+ assert(fs.existsSync(file), "failure records are kept for the history");
+ const history = updateFailureHistory(f.config.directory);
+ assert.equal(history.length, 1);
+ assert.equal(history[0].id, "old");
+ assert.equal(history[0].superseded, false, "no installed version was supplied");
+ // target <= installed is stale even without a recorded success.
+ recordUpdateFailure(f.config.directory, failed);
+ assert.equal(lastUpdateFailure(f.config.directory, { inProgress: false, stage: "idle" }, { dsh: "1.2.4" }), null);
+ assert.equal(lastUpdateFailure(f.config.directory, { inProgress: false, stage: "idle" }, { dsh: "1.3.0" }), null);
+ assert.equal(updateFailureHistory(f.config.directory, { installed: { dsh: "1.3.0" } })[0].superseded, true);
+ // A target that is still newer than the installation is the current failure.
+ assert.equal(lastUpdateFailure(f.config.directory, { inProgress: false, stage: "idle" }, { dsh: "1.0.0" }).id, "old");
+ // A running attempt must not surface the previous failure.
+ assert.equal(lastUpdateFailure(f.config.directory, { inProgress: true, stage: "preflight" }), null);
 });
 
 test("durable locks serialize updates and detect Linux PID reuse", t => {

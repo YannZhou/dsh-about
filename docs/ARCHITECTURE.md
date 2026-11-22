@@ -69,18 +69,19 @@
 
 ## 更新与自动重启
 
-`POST /update` 验证目标已发布后返回 `202` 与任务 ID。独立事务复制运行代码到数据目录，按“快照 → 安装 → 校验 → 重试/回滚”执行，并把阶段和最终结果原子写入 `update-state.json`；`GET /update-status` 支持前端断线和宿主重启后的接续。`update.lock` 同时保护 dsh 与插件更新。
+`POST /update` 验证目标已发布后返回 `202` 与任务 ID。独立事务复制运行代码到数据目录，按“隔离预检 → 快照 → 安装 → 校验 → 重试/回滚”执行，并把阶段和最终结果原子写入 `update-state.json`。`GET /update-status` 提供可接续的任务状态和上次失败诊断；`GET /failure-history` 返回保留在磁盘上的历次失败。失败记录不删除，展示时按版本判断：目标版本小于等于当前已安装版本即不再进入页面常驻列表，避免成功更新后仍占版面；但记录仍进入感叹号的历史预览/二级菜单并标记为已覆盖（数据本身留在磁盘供诊断）。`update.lock` 同时保护 dsh 与插件更新。
 
 | 模块 | 职责 |
 |---|---|
 | `install-context.mjs` | 实际 dsh 包根、当前 Node/npm、prefix、CLI 链接、peer provider |
 | `update-jobs.mjs` / `update-worker.mjs` | 分离任务、复制运行代码、启动确认和持久结果 |
-| `update-transaction.mjs` | 独立快照、安装、版本核验、重试与回滚 |
+| `update-transaction.mjs` | 试装和正式安装共用 npm 与版本核验流程，以及快照、重试和回滚 |
+| `update-preflight.mjs` / `update-diagnostics.mjs` | 隔离数据目录与 Web 就绪检查，逐阶段失败诊断与脱敏 |
 | `process-runner.mjs` | 进程组/Windows 进程树终止、systemd 安装单元停止确认 |
 | `background-launch.mjs` / `background-entry.mjs` | 脱离宿主派发和安全传递环境 |
 | `update-state.mjs` / `update-recovery.mjs` | 文件锁、任务所有者与异常恢复 |
 
-Linux systemd 下，事务与 npm 安装分属独立 transient unit。安装超时必须确认其 `KillMode=control-group` 单元已停止后才回滚。敏感环境以 `0600` 临时文件传递，不作为 `--setenv` 明文参数。事务本身被强杀时保留快照并禁止新安装，使用 `node scripts/recover-update.mjs` 显式恢复。
+Linux systemd 下，事务与 npm 安装分属独立 transient unit。安装超时必须确认其 `KillMode=control-group` 单元已停止后才回滚。敏感环境以 `0600` 临时文件传递。正式安装中断时保留已有快照并阻止新安装，使用 `node scripts/recover-update.mjs` 显式恢复。预检中断时依旧可以重新发起更新。
 
 
 启动器成功且看护确认初始化后，宿主才会退出。更新成功后，dsh web 的自动重启委托给包内的一次性看护 `dsh-watchdog once`：等宿主退出 → 等 3 秒 → 优先 `systemctl --user start dsh-web`，systemd 不可用才退回落 `dsh web --no-open` → 端口就绪后看护自动退出、零常驻。决策日志在 `$DSH_HOME/dsh-watchdog.log`。

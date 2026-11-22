@@ -38,11 +38,12 @@ function mountStatus(initial = { ok: true, inProgress: false, stage: "idle" }, o
 				getItem(key) { if (options.storageBlocked) throw new Error("Storage blocked"); return localStorage.get(key) ?? null; },
 				setItem(key, value) { if (options.storageBlocked) throw new Error("Storage blocked"); localStorage.set(key, value); }
 			}, __ModuleLoader__: { load({ factory }) { plugin = factory(() => React); } } },
-		navigator: { platform: options.browserPlatform || "Win32" },
+		navigator: { platform: options.browserPlatform || "Win32", clipboard: options.clipboard },
 		document, Date: class extends Date { static now() { return now; } },
 		sessionStorage: { getItem: key => storage.get(key) ?? null, setItem: (key, value) => storage.set(key, value), removeItem: key => storage.delete(key) },
 		fetch: async (url) => {
 			if (url.endsWith("/describe")) return { json: async () => options.describe || { ok: true, platform: options.platform, version: "1.0.0" } };
+			if (url.endsWith("/failure-history")) return { json: async () => options.failureHistory || { ok: true, failures: [] } };
 			calls++; return { json: async () => data };
 		},
 		setInterval(fn, ms) { const id = ++timerId; intervals.set(id, { fn, ms }); return id; },
@@ -56,7 +57,7 @@ function mountStatus(initial = { ok: true, inProgress: false, stage: "idle" }, o
 			const source = effect.fn.toString();
 			const selected = options.notice
 				? source.includes("claimPlatformNotice") || source.includes("platformNoticeVisible") || source.includes('fetch(ENDPOINT + "/describe")')
-				: source.includes('"/update-status"');
+				: (options.mountDescribe && source.includes('fetch(ENDPOINT + "/describe")')) || source.includes('"/update-status"') || source.includes("loadFailureHistory()") || source.includes("historyMenuOpen");
 			if (!selected) continue;
 			const previous = mountedEffects.get(index);
 			if (previous && effect.deps?.every((value, i) => Object.is(value, previous.deps?.[i]))) continue;
@@ -125,6 +126,231 @@ function findNode(tree, predicate) {
 	}
 	return null;
 }
+
+test("last failure is available after reload and copies separate npm and CLI outcomes", async () => {
+	const copied = [];
+	const page = mountStatus({
+		ok: true, stage: "installed", inProgress: false,
+		lastFailure: {
+			id: "old", kind: "dsh", target: "2.0.0", stage: "verifying", summary: "缺少 EntryValidationError",
+			rolledBack: true, installedVersion: "1.0.0", checks: [
+				{ phase: "install", ok: true, code: 0 },
+				{ phase: "cli", ok: false, code: 1, dependency: { name: "fixture-loader", version: "1.1.0" } }
+			]
+		}
+	}, { clipboard: { async writeText(text) { copied.push(text); } } });
+	await page.flush();
+	page.remount(); await page.flush();
+	const report = findNode(page.render(), node => node.type === "details" && JSON.stringify(node).includes("上次更新失败"));
+	assert(report);
+	const button = findNode(report, node => node.type === "button" && node.children.includes("复制诊断"));
+	await button.props.onClick();
+	assert.match(copied[0], /正式 npm 安装：通过（退出码 0）/);
+	assert.match(copied[0], /正式 CLI 校验：失败（退出码 1）/);
+	assert.match(copied[0], /fixture-loader@1\.1\.0/);
+	assert.match(copied[0], /已恢复到 1\.0\.0/);
+	assert.match(JSON.stringify(page.render()), /诊断已复制/);
+	page.cleanup();
+});
+
+test("failure dialog can be opened from failure card and shows detailed diagnostics", async () => {
+	const copied = [];
+	const page = mountStatus({
+		ok: true, stage: "installed", inProgress: false,
+		lastFailure: {
+			id: "diag-test", kind: "dsh", target: "0.2.3-alpha.1", stage: "verifying",
+			summary: "SyntaxError: missing EntryValidationError",
+			rolledBack: true, installedVersion: "0.2.2-rc.5", checks: [
+				{ phase: "install", ok: true, code: 0 },
+				{ phase: "cli", ok: false, code: 1, dependency: { name: "@deepseek-ai/cordis-plugin-loader", version: "1.1.0" } }
+			],
+			hint: "请在隔离环境复现并核对实际解析到的依赖版本。"
+		}
+	}, { clipboard: { async writeText(text) { copied.push(text); } } });
+	await page.flush();
+
+	const card = findNode(page.render(), node => node.type === "details" && JSON.stringify(node).includes("上次更新失败"));
+	assert(card);
+	const viewDialogBtn = findNode(card, node => node.type === "button" && node.children.includes("查看详细诊断"));
+	assert(viewDialogBtn);
+
+	await viewDialogBtn.props.onClick();
+	const dialog = findNode(page.render(), node => node.props?.["aria-labelledby"] === "dsh-about-failure-title");
+	assert(dialog);
+	assert.match(JSON.stringify(dialog), /更新失败诊断 · DSH v0\.2\.3-alpha\.1/);
+	assert.match(JSON.stringify(dialog), /已安全回退到 0\.2\.2-rc\.5/);
+
+	const copyBtn = findNode(dialog, node => node.type === "button" && node.children.includes("复制诊断"));
+	assert(copyBtn);
+	await copyBtn.props.onClick();
+	assert.match(copied[0], /【DSH 更新失败诊断报告与修复请求】/);
+	assert.match(copied[0], /@deepseek-ai\/cordis-plugin-loader@1\.1\.0/);
+
+	const closeBtn = findNode(dialog, node => node.type === "button" && node.children.includes("关闭"));
+	assert(closeBtn);
+	await closeBtn.props.onClick();
+	assert.equal(findNode(page.render(), node => node.props?.["aria-labelledby"] === "dsh-about-failure-title"), null);
+	page.cleanup();
+});
+
+test("a failure for the version that is already running is not shown again", async () => {
+	const page = mountStatus({
+		ok: true, stage: "installed", inProgress: false,
+		lastFailure: {
+			id: "stale-preflight", kind: "dsh", target: "0.2.3-alpha.2", stage: "preflight",
+			summary: "npm 安装超时", finishedAt: 1, checks: [{ phase: "preflight-install", ok: false, timedOut: true, code: null }]
+		}
+	}, { mountDescribe: true, describe: { ok: true, version: "0.2.3-alpha.2" } });
+	await page.flush();
+	await page.flush();
+	assert.equal(findNode(page.render(), node => node.type === "details" && JSON.stringify(node).includes("上次更新失败")), null);
+	assert.equal(findNode(page.render(), node => node.props?.["aria-labelledby"] === "dsh-about-failure-title"), null);
+	page.cleanup();
+});
+
+test("the same failure still renders while its target is not installed", async () => {
+	const page = mountStatus({
+		ok: true, stage: "installed", inProgress: false,
+		lastFailure: {
+			id: "current-preflight", kind: "dsh", target: "0.2.4", stage: "preflight",
+			summary: "npm 安装超时", finishedAt: 1, checks: []
+		}
+	}, { mountDescribe: true, describe: { ok: true, version: "0.2.3-alpha.2" } });
+	await page.flush();
+	await page.flush();
+	assert(findNode(page.render(), node => node.type === "details" && JSON.stringify(node).includes("上次更新失败")));
+	page.cleanup();
+});
+
+test("covered failures stay out of the surface list but remain in the history menu", async () => {
+	const page = mountStatus({
+		ok: true, stage: "installed", inProgress: false, lastFailure: null
+	}, {
+		failureHistory: { ok: true, failures: [
+			{
+				id: "archived", kind: "dsh", target: "0.2.3-alpha.1", stage: "preflight", summary: "旧版本的 npm 安装超时",
+				finishedAt: 1000, superseded: true, checks: [{ phase: "preflight-install", ok: false, timedOut: true, code: null }],
+				hint: "请切换更新源后重试"
+			}
+		] }
+	});
+	await page.flush();
+	await page.flush();
+	// 表面（常驻列表）不展示已覆盖的旧记录
+	assert.equal(findNode(page.render(), node => node.props?.className?.includes("dsh-about-history-panel")), null);
+	assert.equal(findNode(page.render(), node => node.props?.className?.includes("dsh-about-history-item")), null);
+	// 感叹号入口仍指向完整历史，并且能在悬停内容里看到旧记录
+	const trigger = findNode(page.render(), node => node.props?.["aria-haspopup"] === "dialog");
+	assert(trigger, "检查更新行末尾仍保留感叹号入口");
+	assert.match(trigger.props["aria-label"], /报错历史（1 条）/);
+	assert.doesNotMatch(trigger.props.className, /dsh-about-bang-btn-idle/);
+	const bang = findNode(page.render(), node => node.props?.className === "dsh-about-bang");
+	assert(bang);
+	assert.match(JSON.stringify(bang), /旧版本的 npm 安装超时/, "悬停预览应包含全部历史");
+	assert.match(JSON.stringify(bang), /均已覆盖/);
+	// 二级菜单同样展示全部历史，并标注已覆盖
+	await trigger.props.onClick();
+	await page.flush();
+	const dialog = findNode(page.render(), node => node.props?.["aria-labelledby"] === "dsh-about-history-title");
+	assert(dialog);
+	assert.match(JSON.stringify(dialog), /旧版本的 npm 安装超时/);
+	assert.match(JSON.stringify(dialog), /已被新版本覆盖/);
+	assert.match(JSON.stringify(dialog), /共 1 条，均已覆盖/);
+	const oldRow = findNode(dialog, node => node.props?.className?.includes("dsh-about-history-item-old"));
+	assert(oldRow, "已覆盖记录在菜单里发灰显示");
+	page.cleanup();
+});
+
+test("current error history is displayed and opens its diagnostics", async () => {
+	const copied = [];
+	const page = mountStatus({
+		ok: true, stage: "installed", inProgress: false, lastFailure: null
+	}, {
+		clipboard: { async writeText(text) { copied.push(text); } },
+		failureHistory: { ok: true, failures: [
+			{
+				id: "current", kind: "dsh", target: "0.2.3-alpha.3", stage: "preflight", summary: "npm 安装超时",
+				finishedAt: 1000, superseded: false, checks: [{ phase: "preflight-install", ok: false, timedOut: true, code: null }],
+				hint: "请切换更新源后重试"
+			}
+		] }
+	});
+	await page.flush();
+	await page.flush();
+	const tree = JSON.stringify(page.render());
+	assert.match(tree, /npm 安装超时/);
+	assert.doesNotMatch(tree, /已被新版本覆盖/);
+	const trigger = findNode(page.render(), node => node.props?.["aria-haspopup"] === "dialog");
+	assert(trigger);
+	assert.match(trigger.props["aria-label"], /报错历史（1 条）/);
+	assert.doesNotMatch(trigger.props.className, /dsh-about-bang-btn-idle/);
+	const bang = findNode(page.render(), node => node.props?.className === "dsh-about-bang");
+	assert(bang);
+	assert.match(JSON.stringify(bang), /点击感叹号查看全部/, "悬停预览内容随触发器一起渲染");
+	const panel = findNode(page.render(), node => node.props?.className?.includes("dsh-about-history-panel"));
+	assert(panel, "报错历史列表常驻在检查更新与版本更新记录之间");
+	const detail = findNode(page.render(), node => node.type === "button" && node.children?.includes("详情"));
+	assert(detail);
+	await detail.props.onClick();
+	const dialog = findNode(page.render(), node => node.props?.["aria-labelledby"] === "dsh-about-failure-title");
+	assert(dialog);
+	assert.match(JSON.stringify(dialog), /0\.2\.3-alpha\.3/);
+	assert.match(JSON.stringify(dialog), /请切换更新源后重试/);
+	const copy = findNode(dialog, node => node.type === "button" && node.children?.includes("复制诊断"));
+	await copy.props.onClick();
+	assert.match(copied[0], /【DSH 更新失败诊断报告与修复请求】/);
+	page.cleanup();
+});
+
+test("the surface lists only pending errors while the history menu lists all", async () => {
+	const page = mountStatus({
+		ok: true, stage: "installed", inProgress: false, lastFailure: null
+	}, {
+		failureHistory: { ok: true, failures: [
+			{ id: "newer", kind: "dsh", target: "0.2.3-alpha.2", stage: "verifying", summary: "第二条报错", finishedAt: 2000, superseded: false, checks: [] },
+			{ id: "older", kind: "plugin", target: "1.8.4", stage: "preflight", summary: "第一条报错", finishedAt: 1000, superseded: true, checks: [] }
+		] }
+	});
+	await page.flush();
+	await page.flush();
+	const trigger = findNode(page.render(), node => node.props?.["aria-haspopup"] === "dialog");
+	assert(trigger);
+	assert.match(trigger.props["aria-label"], /报错历史（2 条）/, "入口计数按全部历史计算");
+	assert.doesNotMatch(trigger.props.className, /dsh-about-bang-btn-idle/, "有历史记录时感叹号保持琥珀色");
+	const panel = findNode(page.render(), node => node.props?.className?.includes("dsh-about-history-panel"));
+	assert(panel, "表面列表仍展示待处理记录");
+	assert.match(JSON.stringify(panel), /第二条报错/);
+	assert.doesNotMatch(JSON.stringify(panel), /第一条报错/, "已覆盖的记录不进入表面列表");
+	await trigger.props.onClick();
+	await page.flush();
+	const dialog = findNode(page.render(), node => node.props?.["aria-labelledby"] === "dsh-about-history-title");
+	assert(dialog);
+	assert.match(JSON.stringify(dialog), /共 2 条/);
+	const list = findNode(dialog, node => node.props?.className?.includes("dsh-about-history-dialog-list"));
+	assert(list, "二级菜单使用可滚动列表");
+	assert.equal((JSON.stringify(list).match(/className":"dsh-about-history-item/g) || []).length, 2);
+	assert.match(JSON.stringify(list), /第二条报错/);
+	assert.match(JSON.stringify(list), /第一条报错/, "二级菜单展示全部历史");
+	assert.match(JSON.stringify(list), /已被新版本覆盖/);
+	assert.match(JSON.stringify(dialog), /其中 1 条仍需处理/);
+	// Escape 关闭二级菜单
+	page.key({ key: "Escape" });
+	await page.flush();
+	assert.equal(findNode(page.render(), node => node.props?.["aria-labelledby"] === "dsh-about-history-title"), null);
+	// 重新打开后可用「关闭」按钮退出
+	const reopen = findNode(page.render(), node => node.props?.["aria-haspopup"] === "dialog");
+	await reopen.props.onClick();
+	await page.flush();
+	const reopened = findNode(page.render(), node => node.props?.["aria-labelledby"] === "dsh-about-history-title");
+	assert(reopened);
+	const close = findNode(reopened, node => node.type === "button" && node.children?.includes("关闭"));
+	assert(close);
+	await close.props.onClick();
+	await page.flush();
+	assert.equal(findNode(page.render(), node => node.props?.["aria-labelledby"] === "dsh-about-history-title"), null);
+	page.cleanup();
+});
+
 const notice = (page) => findNode(page.render(), node => node.props?.["aria-labelledby"] === "dsh-about-platform-notice-title");
 
 for (const platform of ["win32 x64", "darwin arm64"]) {
@@ -134,8 +360,9 @@ for (const platform of ["win32 x64", "darwin arm64"]) {
 		assert.equal(notice(page), null, "wait for the host platform before displaying");
 		await page.flush();
 		assert(notice(page));
-		assert.match(JSON.stringify(notice(page)), /从下一个版本起，dsh-about 将不再支持 Windows 和 macOS/);
+		assert.match(JSON.stringify(notice(page)), /计划在后续版本停止支持 Windows 和 macOS/);
 		assert.match(JSON.stringify(notice(page)), /官方桌面端/);
+		assert.match(JSON.stringify(notice(page)), /当前版本仍保留三平台支持/);
 		assert(page.noticeFocused, "focus moves to the close button");
 		findNode(notice(page), node => node.type === "button").props.onClick();
 		await page.flush(); assert.equal(notice(page), null); assert(page.focusRestored);

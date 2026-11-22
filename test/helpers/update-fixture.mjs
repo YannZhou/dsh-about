@@ -25,9 +25,11 @@ export function makeFixture(mode = "success") {
  fs.writeFileSync(path.join(config.base,'started'),'yes');
  if(config.delay) await new Promise(r=>setTimeout(r,config.delay));
  const spec=args.at(-1); const target=spec.slice(spec.lastIndexOf('@')+1);
+ const chosenPrefix=args[args.indexOf('--prefix')+1];
+ const root=path.join(chosenPrefix, path.relative(config.prefix, config.installRoot));
  ${writeTree.toString()}
- fs.rmSync(config.installRoot,{recursive:true,force:true});
- writeTree(config.installRoot,target,config.mode==='bad-version'?target+'0':null);
+ fs.rmSync(root,{recursive:true,force:true});
+ writeTree(root,target,config.mode==='bad-version'?target+'0':null,config.mode);
  if(config.mode==='hang') {
    const writer=path.join(config.base,'writer.mjs');
    fs.writeFileSync(writer, "import fs from 'node:fs'; process.on('SIGTERM',()=>{}); setInterval(()=>fs.appendFileSync("+JSON.stringify(path.join(config.base,'writes'))+",'x'),15);");
@@ -43,9 +45,26 @@ export function makeFixture(mode = "success") {
  };
 }
 
-export function writeTree(root, version, cliVersion = null) {
+export function writeTree(root, version, cliVersion = null, mode) {
  fs.mkdirSync(path.join(root, "bin"), { recursive: true });
  fs.writeFileSync(path.join(root, "package.json"), JSON.stringify({ name: "@deepseek-ai/dsh", version, bin: { unrelated: "other.mjs", dsh: "bin/dsh.mjs" } }));
  fs.writeFileSync(path.join(root, "native.node"), "old native fixture");
- fs.writeFileSync(path.join(root, "bin", "dsh.mjs"), `#!/usr/bin/env node\nconsole.log(${JSON.stringify(cliVersion || version)});\n`, { mode: 0o755 });
+ let cli = "#!/usr/bin/env node\n";
+ if (mode === "module-export") {
+  const dependency = path.join(root, "node_modules", "fixture-loader");
+  fs.mkdirSync(dependency, { recursive: true });
+  fs.writeFileSync(path.join(dependency, "package.json"), JSON.stringify({ name: "fixture-loader", type: "module", version: "1.1.0", main: "index.js" }));
+  fs.writeFileSync(path.join(dependency, "index.js"), "export const Other = 1;");
+  cli += "import { EntryValidationError } from 'fixture-loader';\n";
+ }
+ if (mode === "web") {
+  cli += "import {createServer} from 'node:http';\n";
+  cli += "if (process.argv.includes('--profile')) {\n";
+  cli += "if (!process.env.DSH_HOME || process.env.FIXTURE_PASSWORD) process.exit(3);\n";
+  cli += "const server=createServer((req,res)=>{if(req.url.includes('token=')){res.writeHead(303,{'set-cookie':'dsh=ready; HttpOnly',location:'./'});}else{res.statusCode=req.headers.cookie==='dsh=ready'?200:401;}res.end();});\n";
+  cli += "server.listen(0,'127.0.0.1',()=>console.log('dsh web: http://127.0.0.1:'+server.address().port+'/?token=fixture-private'));\n";
+  cli += "} else ";
+ }
+ cli += "console.log(" + JSON.stringify(cliVersion || version) + ");\n";
+ fs.writeFileSync(path.join(root, "bin", "dsh.mjs"), cli, { mode: 0o755 });
 }
